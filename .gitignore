@@ -1,1 +1,15 @@
-trade-ai/
+# Virtual environment
+.venv/
+
+# Python cache files (speeds up execution but shouldn't be on GitHub)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local environment variables / API secrets (CRITICAL for security)
+.env
+.env.local
+
+# IDE configurations
+.vscode/

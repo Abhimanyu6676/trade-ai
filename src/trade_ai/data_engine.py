@@ -2,9 +2,10 @@ import datetime
 
 import pandas as pd
 import torch
-from features import calculate_ema, calculate_rsi
-from model import StockPredictionBrain  # Import your custom network blueprint
 from openalgo import api
+
+from trade_ai.features import calculate_ema, calculate_rsi
+from trade_ai.model import StockPredictionBrain  # Import your custom network blueprint
 
 OPENALGO_HOST = "https://openalgo-1.sternetsmart.com"
 OPENALGO_API_KEY = "888c8a1c731f0847cda2b4c5a8b449e248b1305fdb304baad2e0ec7b4575dde8"

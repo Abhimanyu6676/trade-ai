@@ -4,9 +4,9 @@
 # OPENALGO_API_KEY = "888c8a1c731f0847cda2b4c5a8b449e248b1305fdb304baad2e0ec7b4575dde8"
 
 import gradio as ui
-from ai_parser import extract_market_intent
 
-from data_engine import fetch_and_clean_candles
+from trade_ai.ai_parser import extract_market_intent
+from trade_ai.data_engine import fetch_and_clean_candles
 
 
 def controller_pipeline(user_query: str, interval: str, exchange: str):
