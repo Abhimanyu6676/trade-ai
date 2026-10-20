@@ -3,7 +3,7 @@ import datetime
 import pandas as pd
 
 from trade_ai.features import compute_normalized_features
-from trade_ai.openalgo import openalgo
+from trade_ai.openalgo_client import openalgo
 from trade_ai.prediction_engine import run_ai_prediction_inference
 
 

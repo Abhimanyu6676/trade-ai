@@ -39,7 +39,7 @@ The model currently uses 216 input features. EMA 9/21/50 distances, the 1-minute
 │       ├── prediction_engine.py            # Model lifecycle and inference
 │       ├── features.py                     # Feature engineering & normalization utilities
 │       ├── stock_metadata.py                # Enum-backed stock metadata registry
-│       ├── openalgo.py                     # Shared OpenAlgo client and API operations
+│       ├── openalgo_client.py              # Shared OpenAlgo client and API operations
 │       ├── util.py                         # Shared OHLCV normalization utilities
 │       ├── model.py                        # Main model
 │       └── train.py                        # Main training script & batched data loader

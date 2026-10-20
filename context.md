@@ -8,13 +8,13 @@ A Python/`uv` project for market-data analysis and GRU-based directional forecas
 
 1. `src/trade_ai/app.py` accepts a prompt and shows the result in Gradio on port 7860.
 2. `ai_parser.py` uses local Ollama `qwen2.5:0.5b` to extract action, ticker, and lookback days. Its date anchor comes from the system date at process startup.
-3. `openalgo.py` owns the shared OpenAlgo client and performs history/status API calls.
+3. `openalgo_client.py` owns the shared OpenAlgo client and performs history/status API calls.
 4. `data_engine.py` requests candles through that client and builds features; `prediction_engine.py` owns model loading, lifecycle, and inference.
 5. `util.py` provides shared OHLCV normalization for inference, downloaded data, and CSV cache reads.
 6. `features.py` builds normalized base and multi-timeframe inputs using indicator formulas from `src/trade_ai/indicator/`.
 7. `stock_metadata.py` defines enum-backed cap and sector categories, ticker mappings, and defaults.
 8. `model.py` defines the GRU classifier.
-9. `train.py` requests history through `openalgo.py`, normalizes/caches it, and trains the model.
+9. `train.py` requests history through `openalgo_client.py`, normalizes/caches it, and trains the model.
 
 ## Data and Feature Contract
 
@@ -39,7 +39,7 @@ A Python/`uv` project for market-data analysis and GRU-based directional forecas
 
 - Requires Python 3.14+ (`.python-version`) and `uv`.
 - `OPENALGO_API_KEY` is required; `OPENALGO_HOST` is optional. `.env` is Git-ignored but is not loaded by the app. Source it into the shell before app or training commands.
-- `src/trade_ai/openalgo.py` lazily creates one SDK client from those environment variables and exposes history and analyzer-status operations. `get_history()` standardizes DataFrame OHLCV results through `standardize_ohlcv_columns()` by default; pass `standardize=False` to retain the SDK response. Training and inference use its shared `openalgo` instance.
+- `src/trade_ai/openalgo_client.py` lazily creates one SDK client from those environment variables and exposes history and analyzer-status operations. `get_history()` standardizes DataFrame OHLCV results through `standardize_ohlcv_columns()` by default; pass `standardize=False` to retain the SDK response. Training and inference use its shared `openalgo` instance.
 - `src/trade_ai/util.py` provides `load_cached_ohlcv(path, standardize=True)`, returning cached data or `None` when absent, and `standardize_ohlcv_columns()` for lowercase/title-case OHLCV names and timestamps stored as a dataframe index or column. Use `standardize=False` only when a caller needs untouched CSV column names.
 - Sync dependencies: `uv sync`.
 - Launch UI: `uv run python src/trade_ai/app.py`.

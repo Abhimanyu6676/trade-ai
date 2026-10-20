@@ -14,7 +14,7 @@ from trade_ai.features import (
     compute_normalized_features,
 )
 from trade_ai.model import StockPredictionBrain
-from trade_ai.openalgo import openalgo
+from trade_ai.openalgo_client import openalgo
 from trade_ai.stock_metadata import STOCK_METADATA
 from trade_ai.util import load_cached_ohlcv
 

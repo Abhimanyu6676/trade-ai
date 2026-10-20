@@ -14,7 +14,7 @@ From the repository root, sync the project dependencies into the project-managed
 uv sync
 ```
 
-Put local OpenAlgo settings in the ignored `.env` file. Do not commit it. Required: `OPENALGO_API_KEY`. Optional: `OPENALGO_HOST` (defaults to the endpoint configured in `src/trade_ai/openalgo.py`). The app reads process environment variables and does not load `.env` itself, so load the values in the shell before running it:
+Put local OpenAlgo settings in the ignored `.env` file. Do not commit it. Required: `OPENALGO_API_KEY`. Optional: `OPENALGO_HOST` (defaults to the endpoint configured in `src/trade_ai/openalgo_client.py`). The app reads process environment variables and does not load `.env` itself, so load the values in the shell before running it:
 
 ```sh
 set -a

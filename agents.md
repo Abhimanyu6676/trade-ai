@@ -15,7 +15,7 @@ Last reviewed: 2026-10-20. Treat this as the short, source-checked handoff for t
 - Prompt parsing: `src/trade_ai/ai_parser.py` (local Ollama model `qwen2.5:0.5b`).
 - Candle retrieval and feature processing: `src/trade_ai/data_engine.py`.
 - Model loading, lifecycle, and inference: `src/trade_ai/prediction_engine.py`.
-- OpenAlgo client lifecycle and API operations: `src/trade_ai/openalgo.py`. Route every SDK call through its shared `openalgo` instance; `get_history()` applies `standardize_ohlcv_columns()` by default and accepts `standardize=False` for raw SDK responses.
+- OpenAlgo client lifecycle and API operations: `src/trade_ai/openalgo_client.py`. Route every SDK call through its shared `openalgo` instance; `get_history()` applies `standardize_ohlcv_columns()` by default and accepts `standardize=False` for raw SDK responses.
 - Shared data utilities: `src/trade_ai/util.py`. `load_cached_ohlcv(path, standardize=True)` loads an existing CSV or returns `None`; turn standardization off only when the caller needs the original CSV columns. `standardize_ohlcv_columns()` owns the common OHLCV column and timestamp-index normalization.
 - Feature assembly: `src/trade_ai/features.py`.
 - Enum-backed stock categories and ticker metadata: `src/trade_ai/stock_metadata.py`.
@@ -50,7 +50,7 @@ Last reviewed: 2026-10-20. Treat this as the short, source-checked handoff for t
 
 ## Environment and Commands
 
-- `OPENALGO_API_KEY` is required. `OPENALGO_HOST` is optional and defaults to the endpoint configured in `src/trade_ai/openalgo.py`.
+- `OPENALGO_API_KEY` is required. `OPENALGO_HOST` is optional and defaults to the endpoint configured in `src/trade_ai/openalgo_client.py`.
 - `.env` is ignored by Git, but the application does not load it automatically. Export its values into the shell before running commands, for example:
 
   ```sh
