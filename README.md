@@ -35,7 +35,8 @@ The model currently uses 216 input features. EMA 9/21/50 distances, the 1-minute
 │       ├── __init__.py
 │       ├── ai_parser.py                    # NLP parser
 │       ├── app.py                          # Main app
-│       ├── data_engine.py                  # Feature processing and model inference
+│       ├── data_engine.py                  # Candle retrieval and feature processing
+│       ├── prediction_engine.py            # Model lifecycle and inference
 │       ├── features.py                     # Feature engineering & normalization utilities
 │       ├── stock_metadata.py                # Enum-backed stock metadata registry
 │       ├── openalgo.py                     # Shared OpenAlgo client and API operations

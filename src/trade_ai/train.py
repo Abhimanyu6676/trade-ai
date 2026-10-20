@@ -323,7 +323,7 @@ def _train_model_in_background():
                 "OpenAlgo availability."
             )
 
-        from trade_ai.data_engine import reload_prediction_brain
+        from trade_ai.prediction_engine import reload_prediction_brain
 
         if not reload_prediction_brain():
             raise RuntimeError("Training finished, but its checkpoint could not be loaded.")
@@ -333,7 +333,7 @@ def _train_model_in_background():
             TRAINING_ERROR = None
         print("✅ [Training] Completed; the app loaded the latest checkpoint.")
     except Exception as error:
-        from trade_ai.data_engine import reload_prediction_brain
+        from trade_ai.prediction_engine import reload_prediction_brain
 
         restored_model = reload_prediction_brain()
         with TRAINING_LOCK:
@@ -356,7 +356,7 @@ def start_model_training() -> str:
         if TRAINING_THREAD is not None and TRAINING_THREAD.is_alive():
             return "Training is already running. Follow progress in the app server console."
 
-        from trade_ai.data_engine import unload_prediction_brain
+        from trade_ai.prediction_engine import unload_prediction_brain
 
         unload_prediction_brain()
         TRAINING_STATE = "running"

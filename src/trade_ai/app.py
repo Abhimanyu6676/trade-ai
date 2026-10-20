@@ -3,11 +3,8 @@
 import gradio as ui
 
 from trade_ai.ai_parser import extract_market_intent
-from trade_ai.data_engine import (
-    fetch_and_clean_candles,
-    get_openalgo_status_message,
-    reset_prediction_brain,
-)
+from trade_ai.data_engine import fetch_and_clean_candles, get_openalgo_status_message
+from trade_ai.prediction_engine import reset_prediction_brain
 
 
 def controller_pipeline(user_query: str, interval: str, exchange: str):
