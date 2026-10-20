@@ -138,6 +138,11 @@ def run_ai_prediction_inference(df: pd.DataFrame, sequence_length: int = 5):
 
 def _run_ai_prediction_inference(df: pd.DataFrame, sequence_length: int = 5):
     """Compute a directional probability from normalized feature data."""
+    # Direction cutoff for the model's bullish-class probability. Values at or
+    # above this cutoff are bullish; lower values are classified as bearish.
+    # This is a classification boundary, not a minimum trade win probability.
+    DIRECTION_PROBABILITY_THRESHOLD = 0.75
+
     model = prediction_ai
     if not MODEL_READY or model is None:
         return "Model unavailable: retrain with the current feature schema", 0.0
@@ -156,7 +161,9 @@ def _run_ai_prediction_inference(df: pd.DataFrame, sequence_length: int = 5):
     with torch.no_grad():
         raw_output_probability = model(input_tensor).item()
 
-    predicted_direction = 1 if raw_output_probability >= 0.50 else -1
+    predicted_direction = (
+        1 if raw_output_probability >= DIRECTION_PROBABILITY_THRESHOLD else -1
+    )
     macro_gate = int(target_slice["Macro_Trend_Gate"].iloc[-1])
     if macro_gate != predicted_direction:
         return "⏸️ NO TRADE (Macro trend gate is neutral or opposing)", round(
