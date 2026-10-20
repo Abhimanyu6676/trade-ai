@@ -8,13 +8,14 @@ import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader, Dataset
 
-from trade_ai.data_engine import get_openalgo_client
 from trade_ai.features import (
     FEATURE_COLUMNS,
-    STOCK_METADATA,
     compute_normalized_features,
 )
 from trade_ai.model import StockPredictionBrain
+from trade_ai.openalgo import openalgo
+from trade_ai.stock_metadata import STOCK_METADATA
+from trade_ai.util import load_cached_ohlcv
 
 # Directory configuration
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -39,41 +40,15 @@ class ReturnWeightedBCELoss(nn.Module):
         return torch.mean(bce_loss * weights)
 
 
-def standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Ensures standard capitalization for OHLCV columns."""
-    df = df.copy()
-    if df.index.name == "timestamp" or (
-        "timestamp" in df.columns and "Timestamp" not in df.columns
-    ):
-        df = df.reset_index()
-
-    clean_cols = {}
-    for col in df.columns:
-        c_low = str(col).lower()
-        if c_low in ["timestamp", "open", "high", "low", "close", "volume"]:
-            clean_cols[col] = c_low.capitalize()
-        else:
-            clean_cols[col] = str(col)
-    return (
-        df.rename(columns=clean_cols).sort_values(by="Timestamp").reset_index(drop=True)
-    )
-
-
 def download_and_cache_stock_history(
     ticker: str, exchange: str = "NSE"
 ) -> pd.DataFrame | None:
-    """Downloads historical 1-minute data month-by-month with retry logic and delays
-
-    to prevent OpenAlgo server timeouts.
-    """
+    """Load cached history or download it and write the resulting CSV cache."""
     os.makedirs(TICK_DATA_DIR, exist_ok=True)
     stock_csv = os.path.join(TICK_DATA_DIR, f"{ticker}_history.csv")
-    client = get_openalgo_client()
-
-    if os.path.exists(stock_csv):
+    df_cached = load_cached_ohlcv(stock_csv)
+    if df_cached is not None:
         print(f"[{ticker}] Found local dataset in 'tickData'. Loading from disk...")
-        df_cached = pd.read_csv(stock_csv)
-        df_cached = standardize_columns(df_cached)
         print(
             f"[{ticker}] Loaded and cleaned {len(df_cached):,} total rows from cache."
         )
@@ -86,13 +61,45 @@ def download_and_cache_stock_history(
         f" {start_date.isoformat()} to {end_date.isoformat()}..."
     )
 
+    full_df = download_stock_history_in_chunks(
+        ticker=ticker,
+        exchange=exchange,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    if full_df is None:
+        print(f"❌ Failed to fetch any historical data for {ticker}.")
+        return None
+
+    full_df.to_csv(stock_csv, index=False)
+    print(
+        f"✅ [{ticker}] Complete! Saved {len(full_df):,} total candles to '{stock_csv}'"
+    )
+    return full_df
+
+
+def download_stock_history_in_chunks(
+    ticker: str,
+    exchange: str,
+    start_date: datetime.date,
+    end_date: datetime.date,
+    chunk_days: int = 30,
+    retries: int = 3,
+) -> pd.DataFrame | None:
+    """Fetch and combine historical 1-minute candles in date chunks.
+
+    Each chunk retries on API exceptions and pauses between requests to reduce
+    the chance of OpenAlgo server timeouts. Failed chunks are skipped after all
+    retries, allowing any successful chunks to be returned.
+    """
     total_days = (end_date - start_date).days
     current_start = start_date
-    all_chunks = []
+    all_chunks: list[pd.DataFrame] = []
     downloaded_rows = 0
 
     while current_start < end_date:
-        current_end = min(current_start + datetime.timedelta(days=30), end_date)
+        chunk_end = current_start + datetime.timedelta(days=chunk_days)
+        current_end = min(chunk_end, end_date)
         start_str = current_start.strftime("%Y-%m-%d")
         end_str = current_end.strftime("%Y-%m-%d")
 
@@ -101,14 +108,13 @@ def download_and_cache_stock_history(
 
         # Retry loop for stability against network/API hiccups
         success = False
-        retries = 3
         for attempt in range(retries):
             try:
                 print(
                     f"  [{progress_pct:.1f}%] Fetching {ticker} | {start_str} to"
                     f" {end_str} (Attempt {attempt + 1})..."
                 )
-                df_chunk = client.history(
+                df_chunk = openalgo.get_history(
                     symbol=ticker,
                     exchange=exchange,
                     interval="1m",
@@ -146,18 +152,10 @@ def download_and_cache_stock_history(
         current_start = current_end + datetime.timedelta(days=1)
 
     if not all_chunks:
-        print(f"❌ Failed to fetch any historical data for {ticker}.")
         return None
 
     full_df = pd.concat(all_chunks).drop_duplicates()
-    full_df = standardize_columns(full_df)
-
-    full_df.to_csv(stock_csv, index=False)
-    print(
-        f"✅ [{ticker}] Complete! Saved {len(full_df):,} total candles to '{stock_csv}'"
-    )
-
-    return full_df
+    return full_df.sort_values(by="Timestamp").reset_index(drop=True)
 
 
 class SlidingWindowDataset(Dataset):
@@ -200,7 +198,7 @@ def create_batched_loader(
 def train_model():
     """Sequential stock-by-stock training loop designed to fit within 4GB RAM limits using mini-batches."""
     # Fail immediately with a clear message if credentials are missing.
-    get_openalgo_client()
+    openalgo.initiate()
     os.makedirs(CACHE_DIR, exist_ok=True)
     os.makedirs(TICK_DATA_DIR, exist_ok=True)
 

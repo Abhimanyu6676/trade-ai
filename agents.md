@@ -14,7 +14,10 @@ Last reviewed: 2026-10-20. Treat this as the short, source-checked handoff for t
 - Main UI: `src/trade_ai/app.py` (Gradio, port 7860).
 - Prompt parsing: `src/trade_ai/ai_parser.py` (local Ollama model `qwen2.5:0.5b`).
 - Data and inference: `src/trade_ai/data_engine.py`.
+- OpenAlgo client lifecycle and API operations: `src/trade_ai/openalgo.py`. Route every SDK call through its shared `openalgo` instance; `get_history()` applies `standardize_ohlcv_columns()` by default and accepts `standardize=False` for raw SDK responses.
+- Shared data utilities: `src/trade_ai/util.py`. `load_cached_ohlcv(path, standardize=True)` loads an existing CSV or returns `None`; turn standardization off only when the caller needs the original CSV columns. `standardize_ohlcv_columns()` owns the common OHLCV column and timestamp-index normalization.
 - Feature assembly: `src/trade_ai/features.py`.
+- Enum-backed stock categories and ticker metadata: `src/trade_ai/stock_metadata.py`.
 - Indicator calculations: `src/trade_ai/indicator/`, one module per indicator (`ema.py`, `rsi.py`, `volatility.py`, `atr.py`, `macd.py`, and `macro_trend.py`).
 - GRU model: `src/trade_ai/model.py`.
 - Training: `src/trade_ai/train.py`.
@@ -26,22 +29,23 @@ Last reviewed: 2026-10-20. Treat this as the short, source-checked handoff for t
 - Higher-timeframe bars are labeled at their close and backward-merged only after completion. Never backfill indicator warmup values from future rows.
 - Resampled intervals: 3m, 5m, 15m, 30m, 1h, and daily. One-hour bars are aligned to the 09:15 market-session open.
 - `add_multi_timeframe_features()` in `src/trade_ai/features.py` prepares timeframe bars, calculates and aligns all EMA features, then calculates other indicators by timeframe. Standard intraday timeframes are 1m, 3m, 5m, 15m, 30m, and 1h. EMA, ATR, volatility, and RSI are calculated for every one. To add another timeframe-based indicator, register its calculation in the non-EMA indicator map; the loop applies it across all standard timeframes. The daily macro gate remains a separate daily calculation. Indicator formulas live in separate modules under `src/trade_ai/indicator/`.
-- `FEATURE_COLUMNS` in `src/trade_ai/features.py` is authoritative. The current GRU input has 78 features: base returns; EMA 9/21/50 distances; multi-timeframe 14-bar and 7-bar ATR, volatility, 14-bar RSI, 21-bar RSI, and relative MACD (12, 26, 9) line/signal/histogram; daily macro gate; and stock metadata.
+- `FEATURE_COLUMNS` in `src/trade_ai/features.py` is authoritative. The current GRU input has 80 features: base returns; EMA 9/21/50 distances; multi-timeframe 14-bar and 7-bar ATR, volatility, 14-bar RSI, 21-bar RSI, and relative MACD (12, 26, 9) line/signal/histogram; daily macro gate; and enum-generated stock metadata flags.
+- `stock_metadata.py` owns the `MarketCap` and `Sector` string enums, typed `StockMetadata` registry, unknown-ticker defaults, enum-generated feature names, and `encode_categorical_metadata()`. Adding an enum member automatically adds its one-hot column to both feature output and `FEATURE_COLUMNS`.
 - EMA values from higher timeframes are represented as scale-independent distances from the current close.
 - `Macro_Trend_Gate` uses completed daily closes, a 10-session SMA, the SMA slope, and price alignment: `1` bullish, `-1` bearish, `0` neutral/warming up. Inference suppresses forecasts that do not match the gate.
 - Forward-return labels are created only when `compute_normalized_features(..., include_targets=True)` is used for training. Inference must retain the newest rows with complete features.
-- A checkpoint must match the feature schema. Previous 25-, 34-, 35-, 39-, 48-, 54-, or 60-input checkpoints are incompatible; inference stays disabled until a compatible model is trained. Checkpoints are saved to `.run_cache/gru_trading_model.pth` after each successful epoch.
+- A checkpoint must match the feature schema. Previous 25-, 34-, 35-, 39-, 48-, 54-, 60-, or 78-input checkpoints are incompatible; inference stays disabled until a compatible model is trained. Checkpoints are saved to `.run_cache/gru_trading_model.pth` after each successful epoch.
 
 ## Training and Data
 
 - Historical minute CSVs are cached under `tickData/`, one file per ticker.
 - Training processes one ticker at a time. `SlidingWindowDataset` holds one feature matrix and returns sequence windows on demand; keep the DataLoader batching (`batch_size=256`) and avoid materializing all overlapping windows.
 - Training currently uses five epochs, sequence length five, Adam, and `ReturnWeightedBCELoss`.
-- Broker downloads use three attempts per chunk. Cached OHLCV fields pass through `standardize_columns()`.
+- Broker downloads use three attempts per chunk. OpenAlgo history is standardized by `openalgo.get_history()`; legacy cached OHLCV CSVs use `load_cached_ohlcv()`.
 
 ## Environment and Commands
 
-- `OPENALGO_API_KEY` is required. `OPENALGO_HOST` is optional and defaults to the configured OpenAlgo endpoint.
+- `OPENALGO_API_KEY` is required. `OPENALGO_HOST` is optional and defaults to the endpoint configured in `src/trade_ai/openalgo.py`.
 - `.env` is ignored by Git, but the application does not load it automatically. Export its values into the shell before running commands, for example:
 
   ```sh

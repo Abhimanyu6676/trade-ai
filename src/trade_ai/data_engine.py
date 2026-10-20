@@ -3,33 +3,17 @@ import os
 
 import pandas as pd
 import torch
-from openalgo import api
 
 from trade_ai.features import FEATURE_COLUMNS, compute_normalized_features
 from trade_ai.model import StockPredictionBrain
-
-OPENALGO_HOST = os.environ.get(
-    "OPENALGO_HOST", "https://openalgo-1.sternetsmart.com"
-)
-_openalgo_client = None
-
-
-def get_openalgo_client():
-    """Create the SDK client on first use, without storing credentials in source."""
-    global _openalgo_client
-    api_key = os.environ.get("OPENALGO_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENALGO_API_KEY is required to connect to OpenAlgo")
-    if _openalgo_client is None:
-        _openalgo_client = api(api_key=api_key, host=OPENALGO_HOST)
-    return _openalgo_client
+from trade_ai.openalgo import openalgo
 
 # Path configuration for the trained model weights
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 CACHE_DIR = os.path.join(BASE_DIR, ".run_cache")
 MODEL_PATH = os.path.join(CACHE_DIR, "gru_trading_model.pth")
 
-# Initialize model dynamically matching the 78-column feature schema.
+# Initialize model dynamically matching the 80-column feature schema.
 prediction_ai = StockPredictionBrain(
     input_dim=len(FEATURE_COLUMNS), hidden_dim=32, num_layers=2
 )
@@ -117,8 +101,7 @@ def fetch_and_clean_candles(ticker: str, days_back: int, interval: str, exchange
         print(
             f"[SDK Call] Requesting {exchange}:{ticker} ({interval}) via Data Engine..."
         )
-        client = get_openalgo_client()
-        df = client.history(
+        df = openalgo.get_history(
             symbol=ticker,
             exchange=exchange,
             interval=interval,
@@ -130,25 +113,11 @@ def fetch_and_clean_candles(ticker: str, days_back: int, interval: str, exchange
         if not isinstance(df, pd.DataFrame) or df.empty:
             return None, "API Empty Payload Error", 0.0
 
-        df = df.copy()
-        if df.index.name == "timestamp" or "timestamp" not in df.columns:
-            df = df.reset_index()
-
-        clean_cols = {}
-        for col in df.columns:
-            c_low = str(col).lower()
-            if c_low in ["timestamp", "open", "high", "low", "close", "volume"]:
-                clean_cols[col] = c_low.capitalize()
-            else:
-                clean_cols[col] = str(col)
-        df = df.rename(columns=clean_cols)
-        df = df.sort_values(by="Timestamp").reset_index(drop=True)
-
         MAX_ALLOWED_ROWS = 5000
         if len(df) > MAX_ALLOWED_ROWS:
             df = df.tail(MAX_ALLOWED_ROWS).reset_index(drop=True)
 
-        # Compute multi-timeframe normalized features (78 model features)
+        # Compute multi-timeframe normalized features (80 model features)
         processed_df = compute_normalized_features(df, ticker)
 
         if processed_df.empty or len(processed_df) < 5:
@@ -184,8 +153,7 @@ def fetch_and_clean_candles(ticker: str, days_back: int, interval: str, exchange
 
 def get_openalgo_status_message():
     try:
-        client = get_openalgo_client()
-        res = client.analyzerstatus()
+        res = openalgo.get_analyzer_status()
         if res.get("status") == "success":
             data = res.get("data", {})
             if not isinstance(data, dict):

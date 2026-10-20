@@ -22,7 +22,7 @@ export OPENALGO_API_KEY="your-api-key"
 export OPENALGO_HOST="https://your-openalgo-host" # optional
 ```
 
-The model currently uses 78 input features. EMA 9/21/50 distances, normalized 14-bar and 7-bar ATR, volatility, 14-bar and 21-bar RSI, and relative MACD (12, 26, 9) line/signal/histogram features are calculated for 1-minute, 3-minute, 5-minute, 15-minute, 30-minute, and 1-hour bars. Feature schema changes require retraining the model. Do not commit local `.env` files.
+The model currently uses 80 input features. EMA 9/21/50 distances, normalized 14-bar and 7-bar ATR, volatility, 14-bar and 21-bar RSI, and relative MACD (12, 26, 9) line/signal/histogram features are calculated for 1-minute, 3-minute, 5-minute, 15-minute, 30-minute, and 1-hour bars. Cap and sector one-hot columns are generated from enums in `stock_metadata.py`, so adding an enum category updates the feature schema automatically. Feature schema changes require retraining the model. Do not commit local `.env` files.
 
 ---
 
@@ -35,8 +35,11 @@ The model currently uses 78 input features. EMA 9/21/50 distances, normalized 14
 │       ├── __init__.py
 │       ├── ai_parser.py                    # NLP parser
 │       ├── app.py                          # Main app
-│       ├── data_engine.py                  # Data fetching from openalgo & manipulation
+│       ├── data_engine.py                  # Feature processing and model inference
 │       ├── features.py                     # Feature engineering & normalization utilities
+│       ├── stock_metadata.py                # Enum-backed stock metadata registry
+│       ├── openalgo.py                     # Shared OpenAlgo client and API operations
+│       ├── util.py                         # Shared OHLCV normalization utilities
 │       ├── model.py                        # Main model
 │       └── train.py                        # Main training script & batched data loader
 |

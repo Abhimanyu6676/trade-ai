@@ -14,7 +14,7 @@ From the repository root, sync the project dependencies into the project-managed
 uv sync
 ```
 
-Put local OpenAlgo settings in the ignored `.env` file. Do not commit it. Required: `OPENALGO_API_KEY`. Optional: `OPENALGO_HOST` (defaults to the endpoint configured in `data_engine.py`). The app reads process environment variables and does not load `.env` itself, so load the values in the shell before running it:
+Put local OpenAlgo settings in the ignored `.env` file. Do not commit it. Required: `OPENALGO_API_KEY`. Optional: `OPENALGO_HOST` (defaults to the endpoint configured in `src/trade_ai/openalgo.py`). The app reads process environment variables and does not load `.env` itself, so load the values in the shell before running it:
 
 ```sh
 set -a
@@ -42,4 +42,4 @@ set +a
 uv run python src/trade_ai/train.py
 ```
 
-Training downloads/caches historical one-minute candles under `tickData/` and saves checkpoints under `.run_cache/`. The current model expects 78 input features. Retrain after changing `FEATURE_COLUMNS`; an incompatible checkpoint is not used for inference, which remains disabled until a compatible checkpoint is trained.
+Training downloads/caches historical one-minute candles under `tickData/` and saves checkpoints under `.run_cache/`. The current model expects 80 input features. Retrain after changing `FEATURE_COLUMNS`; an incompatible checkpoint is not used for inference, which remains disabled until a compatible checkpoint is trained.

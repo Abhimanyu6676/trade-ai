@@ -8,44 +8,10 @@ from trade_ai.indicator import (
     calculate_rsi,
     calculate_volatility,
 )
-
-# Metadata Registry for your stock basket (Market Cap & Sector mapping)
-STOCK_METADATA = {
-    # Large Caps
-    "RELIANCE": {"cap": "large", "sector": "energy"},
-    "TCS": {"cap": "large", "sector": "it"},
-    "INFY": {"cap": "large", "sector": "it"},
-    "SBIN": {"cap": "large", "sector": "banking"},
-    "HDFCBANK": {"cap": "large", "sector": "banking"},
-    "TMPV": {"cap": "large", "sector": "auto"},
-    # "HINDZINC": {"cap": "large", "sector": "metals"},
-    # Mid Caps
-    "FEDERALBNK": {"cap": "mid", "sector": "banking"},
-    "COFORGE": {"cap": "mid", "sector": "it"},
-    "VOLTAS": {"cap": "mid", "sector": "consumer"},
-    # Small Caps
-    "SUZLON": {"cap": "small", "sector": "energy"},
-    "KPITTECH": {"cap": "small", "sector": "it"},
-}
-
-
-def encode_categorical_metadata(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
-    """Adds scale-agnostic One-Hot Encoded market-cap and sector flags."""
-    meta = STOCK_METADATA.get(ticker.upper(), {"cap": "mid", "sector": "other"})
-
-    df["Cap_Large"] = 1.0 if meta["cap"] == "large" else 0.0
-    df["Cap_Mid"] = 1.0 if meta["cap"] == "mid" else 0.0
-    df["Cap_Small"] = 1.0 if meta["cap"] == "small" else 0.0
-
-    df["Sector_Banking"] = 1.0 if meta["sector"] == "banking" else 0.0
-    df["Sector_IT"] = 1.0 if meta["sector"] == "it" else 0.0
-    df["Sector_Auto"] = 1.0 if meta["sector"] == "auto" else 0.0
-    df["Sector_Energy"] = 1.0 if meta["sector"] == "energy" else 0.0
-    df["Sector_Other"] = (
-        1.0 if meta["sector"] not in ["banking", "it", "auto", "energy"] else 0.0
-    )
-
-    return df
+from trade_ai.stock_metadata import (
+    METADATA_FEATURE_COLUMNS,
+    encode_categorical_metadata,
+)
 
 
 def _resample_close(series: pd.Series, rule: str, offset: str | None = None):
@@ -234,7 +200,7 @@ def compute_normalized_features(
     return df.dropna(subset=required_columns)
 
 
-# Complete Feature Schema Definition (78 Features)
+# Complete Feature Schema Definition (80 Features)
 FEATURE_COLUMNS = [
     # Percentage Returns (3)
     "Return_1m",
@@ -321,14 +287,6 @@ FEATURE_COLUMNS = [
     "MACD_Hist_Pct_1h",
     # Macro Trend Gate (1)
     "Macro_Trend_Gate",
-    # Market Cap Categories (3)
-    "Cap_Large",
-    "Cap_Mid",
-    "Cap_Small",
-    # Sector Categories (5)
-    "Sector_Banking",
-    "Sector_IT",
-    "Sector_Auto",
-    "Sector_Energy",
-    "Sector_Other",
+    # One-hot metadata feature columns generated from the metadata enums.
+    *METADATA_FEATURE_COLUMNS,
 ]
