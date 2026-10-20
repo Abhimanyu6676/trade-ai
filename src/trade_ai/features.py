@@ -9,7 +9,7 @@ STOCK_METADATA = {
     "SBIN": {"cap": "large", "sector": "banking"},
     "HDFCBANK": {"cap": "large", "sector": "banking"},
     "TMPV": {"cap": "large", "sector": "auto"},
-    # "HINDZINC": {"cap": "large", "sector": ""},
+    # "HINDZINC": {"cap": "large", "sector": "metals"},
     # Mid Caps
     "FEDERALBNK": {"cap": "mid", "sector": "banking"},
     "COFORGE": {"cap": "mid", "sector": "it"},
