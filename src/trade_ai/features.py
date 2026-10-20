@@ -64,11 +64,13 @@ def _resample_ohlcv(
     ).dropna()
 
 
-def _merge_timeframe_series(
-    df: pd.DataFrame, values: pd.Series, feature_name: str
+def _merge_timeframe_features(
+    df: pd.DataFrame, values: pd.DataFrame, timeframe: str
 ) -> pd.DataFrame:
-    """Backward-merge a timeframe series after its bar has completed."""
-    feature_frame = values.rename(feature_name).rename_axis("Timestamp").reset_index()
+    """Backward-merge a batch of timeframe features after each bar completes."""
+    if timeframe != "1m":
+        values = values.rename(columns=lambda name: f"{name}_{timeframe}")
+    feature_frame = values.rename_axis("Timestamp").reset_index()
     return pd.merge_asof(
         df.sort_values("Timestamp"),
         feature_frame.sort_values("Timestamp"),
@@ -175,11 +177,8 @@ def add_multi_timeframe_features(df: pd.DataFrame) -> pd.DataFrame:
         indicator_values.update(
             {name: bag_values[name] for name in bag_values.columns}
         )
-        for base_name, values in indicator_values.items():
-            feature_name = (
-                base_name if timeframe == "1m" else f"{base_name}_{timeframe}"
-            )
-            df = _merge_timeframe_series(df, values, feature_name)
+        indicator_frame = pd.DataFrame(indicator_values)
+        df = _merge_timeframe_features(df, indicator_frame, timeframe)
 
     # Compare the current 1m footprint with the latest completed 15m and 1h
     # footprint directions. This is a directional HTF-context proxy; it does
