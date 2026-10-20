@@ -7,14 +7,15 @@ TARGET_MODEL = "qwen2.5:0.5b"
 
 
 def extract_market_intent(user_prompt: str):
-    """Uses a local 0.5B LLM to extract financial parameters from unstructured text."""
+    """Uses a local 0.5B LLM to extract financial parameters or detect status requests."""
     system_instruction = f"""
     You are a financial parsing engine. Today's current date is exactly {CURRENT_DATE}.
-    Extract the stock ticker and lookback days from the user text.
+    Determine if the user wants to check 'openalgo_status' (e.g., checking analyzer status, connection, or sandbox mode) or perform 'market_analysis'.
     Return ONLY a raw JSON object. Do not wrap it in markdown code blocks.
     
     JSON Template structure:
     {{
+      "action": "market_analysis" or "openalgo_status",
       "ticker": "UPPERCASE_SYMBOL",
       "days_back": integer
     }}
@@ -25,10 +26,13 @@ def extract_market_intent(user_prompt: str):
             system=system_instruction,
             prompt=user_prompt,
             format="json",
-            options={"temperature": 0.0, "num_predict": 40, "num_ctx": 512},
+            options={"temperature": 0.0, "num_predict": 50, "num_ctx": 512},
         )
         data = json.loads(response["response"].strip())
-        return data.get("ticker", "SBIN"), data.get("days_back", 7)
-    except Exception as e:
+        action = data.get("action", "market_analysis")
+        ticker = data.get("ticker", "SBIN")
+        days_back = data.get("days_back", 7)
+        return action, ticker, days_back
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as e:
         print(f"[AI Module Error] Falling back to defaults: {e}")
-        return "SBIN", 7
+        return "market_analysis", "SBIN", 7

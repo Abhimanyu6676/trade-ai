@@ -6,16 +6,21 @@
 import gradio as ui
 
 from trade_ai.ai_parser import extract_market_intent
-from trade_ai.data_engine import fetch_and_clean_candles
+from trade_ai.data_engine import fetch_and_clean_candles, get_openalgo_status_message
 
 
 def controller_pipeline(user_query: str, interval: str, exchange: str):
-    """Orchestrates requests across NLP parsing, data processing, and prediction neural networks."""
+    """Orchestrates requests across NLP parsing, data processing, OpenAlgo system tools and prediction neural networks."""
     if not user_query.strip():
         return "Please input a text query.", "N/A", "N/A", "N/A", "0.0%", None
 
     # 1. Ask local text AI what the user wants
-    ticker, days_back = extract_market_intent(user_query)
+    action, ticker, days_back = extract_market_intent(user_query)
+
+    # Handle OpenAlgo Analyzer Status Intent Request
+    if action == "openalgo_status":
+        status_msg = get_openalgo_status_message()
+        return status_msg, "OPENALGO", exchange, "SYSTEM_STATUS", "100.0%", None
 
     # 2. Run data engine fetch + forward calculation pass through your custom PyTorch model
     df, ai_signal, confidence = fetch_and_clean_candles(

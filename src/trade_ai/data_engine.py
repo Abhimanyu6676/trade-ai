@@ -73,7 +73,7 @@ def fetch_and_clean_candles(ticker: str, days_back: int, interval: str, exchange
             source="api",
         )
 
-        if df is None or df.empty:
+        if not isinstance(df, pd.DataFrame) or df.empty:
             return None, "API Empty Payload Error", 0.0
 
         df = df.copy()
@@ -127,3 +127,19 @@ def fetch_and_clean_candles(ticker: str, days_back: int, interval: str, exchange
     except Exception as e:
         print(f"[Data Engine Exception]: {e}")
         return None, f"Execution Failure: {e!s}", 0.0
+
+
+def get_openalgo_status_message():
+    """Queries the OpenAlgo server for the live analyzer status."""
+    try:
+        res = client.analyzerstatus()  # OpenAlgo endpoint for analyzer status
+        if res.get("status") == "success":
+            data = res.get("data", {})
+            if not isinstance(data, dict):
+                data = {}
+            mode = data.get("mode", "unknown")
+            analyze_mode = data.get("analyze_mode", True)
+            return f"🟢 **OpenAlgo Status: Online** | Mode: `{mode}` | Sandbox Analyze Mode: `{analyze_mode}`"
+        return "⚠️ OpenAlgo responded, but status check was unsuccessful."
+    except Exception as e:
+        return f"❌ **OpenAlgo Connection Error:** {e!s}"
