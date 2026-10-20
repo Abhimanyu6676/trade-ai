@@ -3,7 +3,11 @@
 import gradio as ui
 
 from trade_ai.ai_parser import extract_market_intent
-from trade_ai.data_engine import fetch_and_clean_candles, get_openalgo_status_message
+from trade_ai.data_engine import (
+    fetch_and_clean_candles,
+    get_openalgo_status_message,
+    reset_prediction_brain,
+)
 
 
 def controller_pipeline(user_query: str, interval: str, exchange: str):
@@ -13,6 +17,16 @@ def controller_pipeline(user_query: str, interval: str, exchange: str):
 
     # 1. Ask local text AI what the user wants
     action, ticker, days_back = extract_market_intent(user_query)
+
+    if action == "reset_brain":
+        reset_message = reset_prediction_brain()
+        return reset_message, "MODEL", exchange, "BRAIN RESET", "0.0%", None
+
+    if action == "start_training":
+        from trade_ai.train import start_model_training
+
+        training_message = start_model_training()
+        return training_message, "MODEL", exchange, "TRAINING", "0.0%", None
 
     # Handle OpenAlgo Analyzer Status Intent Request
     if action == "openalgo_status":
@@ -53,7 +67,10 @@ with ui.Blocks(title="Proprietary AI Quant Suite") as demo:
         with ui.Column(scale=2):
             user_text = ui.Textbox(
                 label="Conversational Prompt Command Request Input",
-                placeholder="Try: 'Check history for SBIN for 30 days' or 'Check openalgo status'...",
+                placeholder=(
+                    "Try: 'Check SBIN for 30 days', 'Check openalgo status', "
+                    "'reset your brain and start as new', or 'start training'..."
+                ),
             )
         with ui.Column(scale=1):
             interval_select = ui.Dropdown(

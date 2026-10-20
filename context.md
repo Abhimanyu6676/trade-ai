@@ -29,6 +29,8 @@ A Python/`uv` project for market-data analysis and GRU-based directional forecas
 ## Model and Training State
 
 - `StockPredictionBrain` builds its GRU input size from `len(FEATURE_COLUMNS)`.
+- `ai_parser.py` detects brain-reset and training-start phrases before calling Ollama. Reset copies an existing checkpoint to `.run_cache/gru_trading_model_backup_<timestamp>.pth`, deletes the original, clears the loaded model from memory, and disables inference until retraining. A failed backup leaves the checkpoint file intact and is reported to the user.
+- Asking the running UI to “start training” or “train the model” calls `train.start_model_training()`. The training module owns the background thread and calls `train_model()`; the data engine only owns inference state and checkpoint loading. Duplicate starts are rejected; inference is disabled while training runs. On completion, the app loads the saved checkpoint immediately. Training resumes from a checkpoint if one exists; reset first to train from scratch. Progress and failures go to the server console, and stopping the app stops in-process training.
 - Training uses `SlidingWindowDataset`, which holds one ticker's feature matrix and produces windows on demand; DataLoader batch size is 256. Training currently runs five epochs, sequence length five, Adam, and `ReturnWeightedBCELoss`.
 - Per-ticker source data is cached in `tickData/`; model checkpoints are stored in `.run_cache/gru_trading_model.pth` after successful epochs.
 - Previous 25-, 34-, 35-, 39-, 48-, 54-, 60-, 78-, 80-, 98-, 116-, 140-, 146-, 152-, 215-, and 232-input checkpoints are incompatible with the current 216-input schema. BAG changed from a Breakaway Gap to a Balanced Price Gap and gained a rejection feature; retrain before using forecasts. Inference is disabled when no compatible checkpoint loads.
@@ -42,4 +44,5 @@ A Python/`uv` project for market-data analysis and GRU-based directional forecas
 - Sync dependencies: `uv sync`.
 - Launch UI: `uv run python src/trade_ai/app.py`.
 - Train/retrain: `uv run python src/trade_ai/train.py`.
+- Alternatively, ask the running UI to “start training”; it runs in the background and updates the live model when complete.
 - See `first-start.md` for `.env` setup and the repo-local temporary-cache workaround.

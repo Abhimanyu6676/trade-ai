@@ -46,3 +46,5 @@ The model currently uses 216 input features. EMA 9/21/50 distances, the 1-minute
 ├── app.py                                  # Live inference application / UI launcher
 ├── requirements.json /.txt                 # Project dependencies
 └── README.md
+
+To start with an untrained model, enter “reset your brain” or “start as new” in the prompt. The app backs up the current checkpoint under `.run_cache/` with a timestamped `_backup_` filename, removes the original checkpoint, and disables inference until retraining and restarting the app to load the new checkpoint.

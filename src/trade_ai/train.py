@@ -1,5 +1,6 @@
 import datetime
 import os
+import threading
 import time  # Make sure time is imported at the top of your train.py
 
 import numpy as np
@@ -22,6 +23,10 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 TICK_DATA_DIR = os.path.join(BASE_DIR, "tickData")
 CACHE_DIR = os.path.join(BASE_DIR, ".run_cache")
 MODEL_PATH = os.path.join(CACHE_DIR, "gru_trading_model.pth")
+TRAINING_LOCK = threading.Lock()
+TRAINING_THREAD = None
+TRAINING_STATE = "idle"
+TRAINING_ERROR = None
 
 class ReturnWeightedBCELoss(nn.Module):
     """Custom Loss Function: Aligns model training with financial expectancy
@@ -195,7 +200,7 @@ def create_batched_loader(
     return DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
 
-def train_model():
+def train_model() -> int:
     """Sequential stock-by-stock training loop designed to fit within 4GB RAM limits using mini-batches."""
     # Fail immediately with a clear message if credentials are missing.
     openalgo.initiate()
@@ -226,6 +231,7 @@ def train_model():
     batch_size = 256  # Keeps RAM usage minimal
 
     tickers = list(STOCK_METADATA.keys())
+    successful_epochs = 0
 
     for epoch in range(epochs):
         print(f"\n--- Epoch {epoch + 1}/{epochs} ---")
@@ -288,6 +294,7 @@ def train_model():
 
             # Checkpoint save after every successful epoch
             torch.save(model.state_dict(), MODEL_PATH)
+            successful_epochs += 1
             print(
                 f"💾 Checkpoint saved: Model weights updated for Epoch {epoch + 1} -> {MODEL_PATH}"
             )
@@ -301,6 +308,70 @@ def train_model():
         gc.collect()
 
     print(f"\n✅ Training fully complete! Final weights saved to: {MODEL_PATH}")
+    return successful_epochs
+
+
+def _train_model_in_background():
+    """Run training asynchronously and refresh the app's inference model."""
+    global TRAINING_STATE, TRAINING_ERROR
+
+    try:
+        completed_epochs = train_model()
+        if completed_epochs == 0:
+            raise RuntimeError(
+                "Training finished without a successful epoch. Check data and "
+                "OpenAlgo availability."
+            )
+
+        from trade_ai.data_engine import reload_prediction_brain
+
+        if not reload_prediction_brain():
+            raise RuntimeError("Training finished, but its checkpoint could not be loaded.")
+
+        with TRAINING_LOCK:
+            TRAINING_STATE = "completed"
+            TRAINING_ERROR = None
+        print("✅ [Training] Completed; the app loaded the latest checkpoint.")
+    except Exception as error:
+        from trade_ai.data_engine import reload_prediction_brain
+
+        restored_model = reload_prediction_brain()
+        with TRAINING_LOCK:
+            TRAINING_STATE = "failed"
+            TRAINING_ERROR = str(error)
+        if restored_model:
+            print(
+                "⚠️ [Training] Background training failed; loaded the latest "
+                f"available checkpoint instead: {error}"
+            )
+        else:
+            print(f"❌ [Training] Background training failed: {error}")
+
+
+def start_model_training() -> str:
+    """Start one training run in the background without blocking the UI."""
+    global TRAINING_THREAD, TRAINING_STATE, TRAINING_ERROR
+
+    with TRAINING_LOCK:
+        if TRAINING_THREAD is not None and TRAINING_THREAD.is_alive():
+            return "Training is already running. Follow progress in the app server console."
+
+        from trade_ai.data_engine import unload_prediction_brain
+
+        unload_prediction_brain()
+        TRAINING_STATE = "running"
+        TRAINING_ERROR = None
+        TRAINING_THREAD = threading.Thread(
+            target=_train_model_in_background,
+            name="trade-ai-training",
+            daemon=True,
+        )
+        TRAINING_THREAD.start()
+
+    return (
+        "Training started in the background. Progress is printed in the app "
+        "server console; inference will become available when training completes."
+    )
 
 
 if __name__ == "__main__":

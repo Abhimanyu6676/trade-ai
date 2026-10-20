@@ -43,3 +43,7 @@ uv run python src/trade_ai/train.py
 ```
 
 Training downloads/caches historical one-minute candles under `tickData/` and saves checkpoints under `.run_cache/`. The current model expects 216 input features. Retrain after changing `FEATURE_COLUMNS` or changing indicator formulas; an incompatible checkpoint is not used for inference, which remains disabled until a compatible checkpoint is trained.
+
+In the running app prompt, ask to “reset your brain” or “start as new” to reset the loaded model. If a checkpoint exists, it is backed up as `.run_cache/gru_trading_model_backup_<timestamp>.pth` before the original is deleted.
+
+Ask the running app to “start training” or “train the model” to launch training in the background. `train.py` owns the background training job; inference is disabled while it runs, then the new checkpoint is loaded into the live app automatically. The command resumes from an existing checkpoint; reset the brain first to train from scratch. Follow progress or errors in the app server console. The training thread runs inside the app process, so stopping the app stops training.
