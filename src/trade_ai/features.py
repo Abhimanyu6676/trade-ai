@@ -10,6 +10,7 @@ from trade_ai.indicator import (
     calculate_macro_trend_gate,
     calculate_rsi,
     calculate_volatility,
+    detect_fvg_events,
 )
 from trade_ai.stock_metadata import (
     METADATA_FEATURE_COLUMNS,
@@ -161,11 +162,12 @@ def add_multi_timeframe_features(df: pd.DataFrame) -> pd.DataFrame:
         indicator_values.update(
             {name: liquidity_values[name] for name in liquidity_values.columns}
         )
-        fvg_values = calculate_fvg(bars, liquidity_values=liquidity_values)
+        fvg_events = detect_fvg_events(bars, liquidity_values=liquidity_values)
+        fvg_values = calculate_fvg(bars, fvg_events=fvg_events)
         indicator_values.update(
             {name: fvg_values[name] for name in fvg_values.columns}
         )
-        bag_values = calculate_bag(bars)
+        bag_values = calculate_bag(bars, fvg_events=fvg_events)
         indicator_values.update(
             {name: bag_values[name] for name in bag_values.columns}
         )
@@ -216,7 +218,7 @@ def compute_normalized_features(
     return df.dropna(subset=required_columns)
 
 
-# Complete Feature Schema Definition (146 Features)
+# Complete Feature Schema Definition (152 Features)
 FEATURE_COLUMNS = [
     # Percentage Returns (3)
     "Return_1m",
@@ -326,25 +328,31 @@ FEATURE_COLUMNS = [
     "FVG_Size_Pct_1h",
     "FVG_Distance_Pct_1h",
     "FVG_Is_Inverse_1h",
-    # Latest unfilled Breakaway Gap state, relative to close (18)
+    # Latest active Balanced Price Gap state and edge rejection (24)
     "BAG_Direction",
     "BAG_Size_Pct",
     "BAG_Distance_Pct",
+    "BAG_Rejection",
     "BAG_Direction_3m",
     "BAG_Size_Pct_3m",
     "BAG_Distance_Pct_3m",
+    "BAG_Rejection_3m",
     "BAG_Direction_5m",
     "BAG_Size_Pct_5m",
     "BAG_Distance_Pct_5m",
+    "BAG_Rejection_5m",
     "BAG_Direction_15m",
     "BAG_Size_Pct_15m",
     "BAG_Distance_Pct_15m",
+    "BAG_Rejection_15m",
     "BAG_Direction_30m",
     "BAG_Size_Pct_30m",
     "BAG_Distance_Pct_30m",
+    "BAG_Rejection_30m",
     "BAG_Direction_1h",
     "BAG_Size_Pct_1h",
     "BAG_Distance_Pct_1h",
+    "BAG_Rejection_1h",
     # Nearest confirmed liquidity levels and sweep events (24)
     "BSL_Distance_Pct",
     "SSL_Distance_Pct",

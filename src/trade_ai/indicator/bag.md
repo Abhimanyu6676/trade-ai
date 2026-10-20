@@ -28,3 +28,12 @@ Price Behavior	Magnet. Price tends to draw deep into the FVG (often 50%) to reba
 Order Speed	Fast, but allows for a measured pullback and mitigation.	Extremely violent. Represents an immediate, aggressive institutional shift.
 
 Would you like me to illustrate this with a text-based chart matrix showing exactly how the bullish and bearish candles overlap to create a BAG after a sweep?
+
+## Feature implementation in this project
+
+- A BAG/BPR is the positive-width intersection of two opposing FVG zones. Both input FVGs must meet the sweep qualification documented in `fvg.md`.
+- The opposing FVGs must form within five bars on the timeframe being calculated. The newer FVG is the reversal leg, so its direction supplies `BAG_Direction`.
+- `BAG_Size_Pct` is the overlap width divided by close. `BAG_Distance_Pct` measures the signed distance to the directionally relevant rejection edge: the upper edge for bullish support and the lower edge for bearish resistance. It deliberately does not measure distance to the midpoint, because BAGs are treated as rejection zones rather than fill magnets.
+- `BAG_Rejection` is a one-bar signal when price touches or penetrates the directional edge and closes back outside the BAG in its expected direction.
+- The latest BAG remains active until a candle closes beyond its far edge. A newer overlapping pair replaces its active zone.
+- The feature pipeline detects sweep-qualified FVG events once per timeframe and shares those events with both the FVG and BAG calculations.

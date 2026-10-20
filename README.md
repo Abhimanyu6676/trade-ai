@@ -22,7 +22,7 @@ export OPENALGO_API_KEY="your-api-key"
 export OPENALGO_HOST="https://your-openalgo-host" # optional
 ```
 
-The model currently uses 146 input features. EMA 9/21/50 distances, normalized 14-bar and 7-bar ATR, volatility, 14-bar and 21-bar RSI, relative MACD (12, 26, 9) line/signal/histogram, Fair Value Gap, Breakaway Gap, buy-side/sell-side liquidity levels, and sweep signals are calculated for 1-minute, 3-minute, 5-minute, 15-minute, 30-minute, and 1-hour bars. FVG requires an opposing-side sweep before its three-candle gap; BAG requires a one-candle gap and a breakout over the prior 20-bar range. FVG midpoint distance is relative to close, and a close through the far edge marks an inverse FVG. Feature schema changes require retraining the model. Do not commit local `.env` files.
+The model currently uses 152 input features. EMA 9/21/50 distances, normalized 14-bar and 7-bar ATR, volatility, 14-bar and 21-bar RSI, relative MACD (12, 26, 9) line/signal/histogram, Fair Value Gap, Balanced Price Gap, buy-side/sell-side liquidity levels, and sweep signals are calculated for 1-minute, 3-minute, 5-minute, 15-minute, 30-minute, and 1-hour bars. FVG requires an opposing-side sweep before its three-candle gap; BAG is the overlap of opposing sweep-qualified FVGs within five bars and includes a rejection signal at its relevant edge. FVG midpoint distance is relative to close, and a close through the far edge marks an inverse FVG. Retrain after feature or formula changes, even if the feature count is unchanged. Do not commit local `.env` files.
 
 ---
 
