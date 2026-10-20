@@ -56,7 +56,7 @@ with ui.Blocks(title="Proprietary AI Quant Suite") as demo:
         with ui.Column(scale=2):
             user_text = ui.Textbox(
                 label="Conversational Prompt Command Request Input",
-                placeholder="Try: 'Check history for SBIN for 30 days'...",
+                placeholder="Try: 'Check history for SBIN for 30 days' or 'Check openalgo status'...",
             )
         with ui.Column(scale=1):
             interval_select = ui.Dropdown(
