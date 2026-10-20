@@ -31,9 +31,9 @@ Would you like me to illustrate this with a text-based chart matrix showing exac
 
 ## Feature implementation in this project
 
-- A BAG/BPR is the positive-width intersection of two opposing FVG zones. Both input FVGs must meet the sweep qualification documented in `fvg.md`.
-- The opposing FVGs must form within five bars on the timeframe being calculated. The newer FVG is the reversal leg, so its direction supplies `BAG_Direction`.
+- A BAG/BPR is the positive-width intersection of two opposing FVG zones. Both input FVGs must be playbook-qualified: sweep-qualified, have a displacement body of at least 1.0 ATR, and close beyond pre-sweep structure.
+- The opposing FVGs must form within two bars by default. The newer FVG must close completely beyond the far edge of the prior opposing FVG; its direction supplies `BAG_Direction`.
 - `BAG_Size_Pct` is the overlap width divided by close. `BAG_Distance_Pct` measures the signed distance to the directionally relevant rejection edge: the upper edge for bullish support and the lower edge for bearish resistance. It deliberately does not measure distance to the midpoint, because BAGs are treated as rejection zones rather than fill magnets.
-- `BAG_Rejection` is a one-bar signal when price touches or penetrates the directional edge and closes back outside the BAG in its expected direction.
+- `BAG_Rejection` is a one-bar signal when price touches or penetrates the directional edge and closes back outside the BAG in its expected direction. `BAG_Retest_Depth` tracks deepest penetration as a fraction of the BAG width; `BAG_Stop_Distance_Pct` uses the far edge, and `BAG_Target_Liquidity_Distance_Pct` uses the nearest BSL/SSL level in the trade direction.
 - The latest BAG remains active until a candle closes beyond its far edge. A newer overlapping pair replaces its active zone.
 - The feature pipeline detects sweep-qualified FVG events once per timeframe and shares those events with both the FVG and BAG calculations.

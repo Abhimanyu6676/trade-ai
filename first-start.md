@@ -42,4 +42,4 @@ set +a
 uv run python src/trade_ai/train.py
 ```
 
-Training downloads/caches historical one-minute candles under `tickData/` and saves checkpoints under `.run_cache/`. The current model expects 152 input features. Retrain after changing `FEATURE_COLUMNS` or changing indicator formulas; an incompatible checkpoint is not used for inference, which remains disabled until a compatible checkpoint is trained.
+Training downloads/caches historical one-minute candles under `tickData/` and saves checkpoints under `.run_cache/`. The current model expects 232 input features. Retrain after changing `FEATURE_COLUMNS` or changing indicator formulas; an incompatible checkpoint is not used for inference, which remains disabled until a compatible checkpoint is trained.

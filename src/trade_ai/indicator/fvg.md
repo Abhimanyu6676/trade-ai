@@ -32,9 +32,11 @@ Would you like me to map out a step-by-step mechanical trading checklist combini
 
 ## Feature implementation in this project
 
-- A bullish FVG is a three-candle gap where `Low[t] > High[t-2]`; it is accepted only when candle `t-1` swept a previously confirmed sell-side liquidity level.
-- A bearish FVG is a three-candle gap where `High[t] < Low[t-2]`; it is accepted only when candle `t-1` swept a previously confirmed buy-side liquidity level.
+- A bullish FVG is a three-candle gap where `Low[t] > High[t-2]`; it is detected only when candle `t-1` swept a previously confirmed sell-side liquidity level. A bearish FVG uses `High[t] < Low[t-2]` after a buy-side sweep.
+- Each detected gap records the third candle's body-to-14-bar-ATR ratio and whether its close breaks structure from before the sweep candle. A structure-qualified event requires at least a 1.0 ATR body and a close beyond the prior 20 bars' highs/lows. `FVG_Setup_Qualified` additionally requires formation during a London or New York killzone. The numeric thresholds are configurable in `detect_fvg_events`.
+- `FVG_In_Killzone` records whether the gap formed from 07:00-10:00 London or New York local time. Naive timestamps are interpreted as `Asia/Kolkata` by default; timezone-aware timestamps retain their timezone. Raw FVG events remain available outside those windows, but `FVG_Setup_Qualified` requires the event to be in a killzone.
 - Liquidity levels are confirmed swing highs/lows with two closed bars to the right. This keeps the sweep-to-FVG sequence causal and avoids using future bars.
-- The FVG midpoint is consequent encroachment. `FVG_Distance_Pct` measures the signed midpoint distance relative to close, while `FVG_Size_Pct` measures zone width relative to close.
+- The FVG midpoint is consequent encroachment. `FVG_Distance_Pct` measures the signed midpoint distance relative to close, while `FVG_Size_Pct` measures zone width relative to close. `FVG_CE_Touched` and `FVG_Retest_Depth` describe whether price reached the midpoint and the deepest zone penetration so far.
+- `FVG_Entry_Edge_Distance_Pct` measures distance to the playbook's preferred edge (upper edge for bullish gaps, lower edge for bearish gaps). `FVG_Stop_Distance_Pct` uses the first candle's low for bullish gaps or high for bearish gaps. `FVG_Target_Liquidity_Distance_Pct` uses the nearest remaining BSL/SSL level in the trade direction; zero means no such level is currently available, consistent with the liquidity features.
 - Partial mitigation keeps the FVG active. A full wick fill without a close through the far edge retires it. A close through the far edge flips its direction and sets `FVG_Is_Inverse`; the inverse state remains until price closes back through the zone.
 - The feature pipeline calculates liquidity once per timeframe and passes its sweep series into the FVG calculation, avoiding duplicate pivot/sweep work.

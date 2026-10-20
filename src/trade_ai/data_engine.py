@@ -117,7 +117,7 @@ def fetch_and_clean_candles(ticker: str, days_back: int, interval: str, exchange
         if len(df) > MAX_ALLOWED_ROWS:
             df = df.tail(MAX_ALLOWED_ROWS).reset_index(drop=True)
 
-        # Compute multi-timeframe normalized features (80 model features)
+        # Compute multi-timeframe normalized features for the current schema.
         processed_df = compute_normalized_features(df, ticker)
 
         if processed_df.empty or len(processed_df) < 5:

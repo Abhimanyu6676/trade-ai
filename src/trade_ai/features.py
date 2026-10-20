@@ -163,11 +163,15 @@ def add_multi_timeframe_features(df: pd.DataFrame) -> pd.DataFrame:
             {name: liquidity_values[name] for name in liquidity_values.columns}
         )
         fvg_events = detect_fvg_events(bars, liquidity_values=liquidity_values)
-        fvg_values = calculate_fvg(bars, fvg_events=fvg_events)
+        fvg_values = calculate_fvg(
+            bars, liquidity_values=liquidity_values, fvg_events=fvg_events
+        )
         indicator_values.update(
             {name: fvg_values[name] for name in fvg_values.columns}
         )
-        bag_values = calculate_bag(bars, fvg_events=fvg_events)
+        bag_values = calculate_bag(
+            bars, fvg_events=fvg_events, liquidity_values=liquidity_values
+        )
         indicator_values.update(
             {name: bag_values[name] for name in bag_values.columns}
         )
@@ -176,6 +180,16 @@ def add_multi_timeframe_features(df: pd.DataFrame) -> pd.DataFrame:
                 base_name if timeframe == "1m" else f"{base_name}_{timeframe}"
             )
             df = _merge_timeframe_series(df, values, feature_name)
+
+    # Compare the current 1m footprint with the latest completed 15m and 1h
+    # footprint directions. This is a directional HTF-context proxy; it does
+    # not claim to detect discretionary demand/supply blocks.
+    df["FVG_HTF_Alignment"] = df["FVG_Direction"] * (
+        df["FVG_Direction_15m"] + df["FVG_Direction_1h"]
+    ) / 2
+    df["BAG_HTF_Alignment"] = df["BAG_Direction"] * (
+        df["BAG_Direction_15m"] + df["BAG_Direction_1h"]
+    ) / 2
 
     # Daily: gate on completed daily close vs 10-session SMA and its slope.
     daily_close = _resample_close(temp_df["Close"], "1D")
@@ -218,7 +232,7 @@ def compute_normalized_features(
     return df.dropna(subset=required_columns)
 
 
-# Complete Feature Schema Definition (152 Features)
+# Complete Feature Schema Definition
 FEATURE_COLUMNS = [
     # Percentage Returns (3)
     "Return_1m",
@@ -303,56 +317,137 @@ FEATURE_COLUMNS = [
     "MACD_Line_Pct_1h",
     "MACD_Signal_Pct_1h",
     "MACD_Hist_Pct_1h",
-    # Latest Fair Value Gap state, including inverse status (24)
+    # Sweep-qualified FVG state and measurable playbook context (78)
     "FVG_Direction",
     "FVG_Size_Pct",
     "FVG_Distance_Pct",
     "FVG_Is_Inverse",
+    "FVG_Displacement_ATR",
+    "FVG_Structure_Break",
+    "FVG_In_Killzone",
+    "FVG_Setup_Qualified",
+    "FVG_Retest_Depth",
+    "FVG_CE_Touched",
+    "FVG_Entry_Edge_Distance_Pct",
+    "FVG_Stop_Distance_Pct",
+    "FVG_Target_Liquidity_Distance_Pct",
     "FVG_Direction_3m",
     "FVG_Size_Pct_3m",
     "FVG_Distance_Pct_3m",
     "FVG_Is_Inverse_3m",
+    "FVG_Displacement_ATR_3m",
+    "FVG_Structure_Break_3m",
+    "FVG_In_Killzone_3m",
+    "FVG_Setup_Qualified_3m",
+    "FVG_Retest_Depth_3m",
+    "FVG_CE_Touched_3m",
+    "FVG_Entry_Edge_Distance_Pct_3m",
+    "FVG_Stop_Distance_Pct_3m",
+    "FVG_Target_Liquidity_Distance_Pct_3m",
     "FVG_Direction_5m",
     "FVG_Size_Pct_5m",
     "FVG_Distance_Pct_5m",
     "FVG_Is_Inverse_5m",
+    "FVG_Displacement_ATR_5m",
+    "FVG_Structure_Break_5m",
+    "FVG_In_Killzone_5m",
+    "FVG_Setup_Qualified_5m",
+    "FVG_Retest_Depth_5m",
+    "FVG_CE_Touched_5m",
+    "FVG_Entry_Edge_Distance_Pct_5m",
+    "FVG_Stop_Distance_Pct_5m",
+    "FVG_Target_Liquidity_Distance_Pct_5m",
     "FVG_Direction_15m",
     "FVG_Size_Pct_15m",
     "FVG_Distance_Pct_15m",
     "FVG_Is_Inverse_15m",
+    "FVG_Displacement_ATR_15m",
+    "FVG_Structure_Break_15m",
+    "FVG_In_Killzone_15m",
+    "FVG_Setup_Qualified_15m",
+    "FVG_Retest_Depth_15m",
+    "FVG_CE_Touched_15m",
+    "FVG_Entry_Edge_Distance_Pct_15m",
+    "FVG_Stop_Distance_Pct_15m",
+    "FVG_Target_Liquidity_Distance_Pct_15m",
     "FVG_Direction_30m",
     "FVG_Size_Pct_30m",
     "FVG_Distance_Pct_30m",
     "FVG_Is_Inverse_30m",
+    "FVG_Displacement_ATR_30m",
+    "FVG_Structure_Break_30m",
+    "FVG_In_Killzone_30m",
+    "FVG_Setup_Qualified_30m",
+    "FVG_Retest_Depth_30m",
+    "FVG_CE_Touched_30m",
+    "FVG_Entry_Edge_Distance_Pct_30m",
+    "FVG_Stop_Distance_Pct_30m",
+    "FVG_Target_Liquidity_Distance_Pct_30m",
     "FVG_Direction_1h",
     "FVG_Size_Pct_1h",
     "FVG_Distance_Pct_1h",
     "FVG_Is_Inverse_1h",
-    # Latest active Balanced Price Gap state and edge rejection (24)
+    "FVG_Displacement_ATR_1h",
+    "FVG_Structure_Break_1h",
+    "FVG_In_Killzone_1h",
+    "FVG_Setup_Qualified_1h",
+    "FVG_Retest_Depth_1h",
+    "FVG_CE_Touched_1h",
+    "FVG_Entry_Edge_Distance_Pct_1h",
+    "FVG_Stop_Distance_Pct_1h",
+    "FVG_Target_Liquidity_Distance_Pct_1h",
+    # Latest active BAG state and playbook execution context (48)
     "BAG_Direction",
     "BAG_Size_Pct",
     "BAG_Distance_Pct",
     "BAG_Rejection",
+    "BAG_Retest_Depth",
+    "BAG_Stop_Distance_Pct",
+    "BAG_Target_Liquidity_Distance_Pct",
+    "BAG_Reversal_Displacement_ATR",
     "BAG_Direction_3m",
     "BAG_Size_Pct_3m",
     "BAG_Distance_Pct_3m",
     "BAG_Rejection_3m",
+    "BAG_Retest_Depth_3m",
+    "BAG_Stop_Distance_Pct_3m",
+    "BAG_Target_Liquidity_Distance_Pct_3m",
+    "BAG_Reversal_Displacement_ATR_3m",
     "BAG_Direction_5m",
     "BAG_Size_Pct_5m",
     "BAG_Distance_Pct_5m",
     "BAG_Rejection_5m",
+    "BAG_Retest_Depth_5m",
+    "BAG_Stop_Distance_Pct_5m",
+    "BAG_Target_Liquidity_Distance_Pct_5m",
+    "BAG_Reversal_Displacement_ATR_5m",
     "BAG_Direction_15m",
     "BAG_Size_Pct_15m",
     "BAG_Distance_Pct_15m",
     "BAG_Rejection_15m",
+    "BAG_Retest_Depth_15m",
+    "BAG_Stop_Distance_Pct_15m",
+    "BAG_Target_Liquidity_Distance_Pct_15m",
+    "BAG_Reversal_Displacement_ATR_15m",
     "BAG_Direction_30m",
     "BAG_Size_Pct_30m",
     "BAG_Distance_Pct_30m",
     "BAG_Rejection_30m",
+    "BAG_Retest_Depth_30m",
+    "BAG_Stop_Distance_Pct_30m",
+    "BAG_Target_Liquidity_Distance_Pct_30m",
+    "BAG_Reversal_Displacement_ATR_30m",
     "BAG_Direction_1h",
     "BAG_Size_Pct_1h",
     "BAG_Distance_Pct_1h",
     "BAG_Rejection_1h",
+    "BAG_Retest_Depth_1h",
+    "BAG_Stop_Distance_Pct_1h",
+    "BAG_Target_Liquidity_Distance_Pct_1h",
+    "BAG_Reversal_Displacement_ATR_1h",
+    # HTF footprint direction agreement with the active 1m footprint.
+    "FVG_HTF_Alignment",
+    "BAG_HTF_Alignment",
     # Nearest confirmed liquidity levels and sweep events (24)
     "BSL_Distance_Pct",
     "SSL_Distance_Pct",
