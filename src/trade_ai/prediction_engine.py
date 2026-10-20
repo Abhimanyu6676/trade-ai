@@ -138,10 +138,10 @@ def run_ai_prediction_inference(df: pd.DataFrame, sequence_length: int = 5):
 
 def _run_ai_prediction_inference(df: pd.DataFrame, sequence_length: int = 5):
     """Compute a directional probability from normalized feature data."""
-    # Direction cutoff for the model's bullish-class probability. Values at or
-    # above this cutoff are bullish; lower values are classified as bearish.
-    # This is a classification boundary, not a minimum trade win probability.
-    DIRECTION_PROBABILITY_THRESHOLD = 0.75
+    # Minimum model confidence required for either direction. The model output
+    # is the bullish-class probability: >= threshold is bullish, <= its
+    # complement is bearish, and values between those bounds produce no trade.
+    CONFIDENCE_THRESHOLD = 0.75
 
     model = prediction_ai
     if not MODEL_READY or model is None:
@@ -161,13 +161,22 @@ def _run_ai_prediction_inference(df: pd.DataFrame, sequence_length: int = 5):
     with torch.no_grad():
         raw_output_probability = model(input_tensor).item()
 
-    predicted_direction = (
-        1 if raw_output_probability >= DIRECTION_PROBABILITY_THRESHOLD else -1
-    )
+    if raw_output_probability >= CONFIDENCE_THRESHOLD:
+        predicted_direction = 1
+        direction_confidence = raw_output_probability
+    elif raw_output_probability <= (1.0 - CONFIDENCE_THRESHOLD):
+        predicted_direction = -1
+        direction_confidence = 1.0 - raw_output_probability
+    else:
+        return (
+            "⏸️ NO TRADE (Confidence below threshold)",
+            round(max(raw_output_probability, 1 - raw_output_probability) * 100, 2),
+        )
+
     macro_gate = int(target_slice["Macro_Trend_Gate"].iloc[-1])
     if macro_gate != predicted_direction:
         return "⏸️ NO TRADE (Macro trend gate is neutral or opposing)", round(
-            max(raw_output_probability, 1 - raw_output_probability) * 100, 2
+            direction_confidence * 100, 2
         )
 
     if predicted_direction > 0:
@@ -175,9 +184,4 @@ def _run_ai_prediction_inference(df: pd.DataFrame, sequence_length: int = 5):
     else:
         signal = "📉 BEARISH FORECAST (Sell/Short Signal)"
 
-    direction_confidence = (
-        raw_output_probability
-        if predicted_direction > 0
-        else 1 - raw_output_probability
-    )
     return signal, round(direction_confidence * 100, 2)
