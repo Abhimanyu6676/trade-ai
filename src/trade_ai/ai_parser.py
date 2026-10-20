@@ -1,8 +1,9 @@
+import datetime
 import json
 
 import ollama
 
-CURRENT_DATE = "2026-10-20"
+CURRENT_DATE = datetime.date.today().isoformat()
 TARGET_MODEL = "qwen2.5:0.5b"
 
 

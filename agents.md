@@ -1,15 +1,56 @@
-# AI Collaborator Agent Guidelines & Roles
+# trade-ai Agent Guide
 
-## Core Objective
-Maintain, optimize, and execute an autonomous, memory-efficient AI trading pipeline designed for resource-constrained environments (4GB RAM VPS). The system integrates **OpenAlgo** for data ingestion, a custom **ReturnWeightedBCELoss** optimization function, and a **GRU neural network** for real-time equity market prediction.
+Last reviewed: 2026-10-20. Treat this as the short, source-checked handoff for the repository; read only task-relevant files after this guide.
 
-## Operational Directives
-1. **Memory Efficiency First:** 
-   - Never load entire multi-year 1-minute historical datasets (e.g., 400k+ row CSVs) into PyTorch tensors all at once. 
-   - Always enforce mini-batching via PyTorch `DataLoader` (`batch_size=256`) and use garbage collection (`gc.collect()`) between iterations to prevent OS-level OOM ("killed") crashes.
-2. **Robust Data Hygiene:**
-   - Always apply the `standardize_columns()` utility to incoming broker or cached CSV payloads to normalize OHLCV casing (`Open`, `High`, `Low`, `Close`, `Volume`, `Timestamp`).
-3. **Fault Tolerance:**
-   - Wrap network and file operations in resilient `try...except` blocks with retry mechanisms (e.g., 3-attempt delays for OpenAlgo API calls) to ensure pipeline continuity if a single ticker or chunk fails.
-4. **Resilient State Management:**
-   - Save model checkpoints (`.pth` files) periodically after every successful training epoch inside `.run_cache/` to ensure seamless resumption or live inference deployment.
+## Maintenance
+
+- When behavior, model inputs, startup, environment requirements, or known operational gotchas change, update this guide and the relevant sections in `context.md` and `first-start.md` in the same change.
+- Never write credential values, tokens, or private environment values into tracked files or logs.
+- Do not add or run tests unless the user asks. No test command is currently configured in `pyproject.toml`.
+
+## Project
+
+- Python project managed with `uv`; requires Python 3.14 or newer (`.python-version`).
+- Main UI: `src/trade_ai/app.py` (Gradio, port 7860).
+- Prompt parsing: `src/trade_ai/ai_parser.py` (local Ollama model `qwen2.5:0.5b`).
+- Data and inference: `src/trade_ai/data_engine.py`.
+- Feature assembly: `src/trade_ai/features.py`.
+- Indicator calculations: `src/trade_ai/indicator/`, one module per indicator (`ema.py`, `rsi.py`, `volatility.py`, `atr.py`, `macd.py`, and `macro_trend.py`).
+- GRU model: `src/trade_ai/model.py`.
+- Training: `src/trade_ai/train.py`.
+- This project produces forecasts; it does not currently submit broker orders.
+
+## Feature and Model Contract
+
+- The pipeline requires one-minute OHLCV source candles with candle-open timestamps. The UI and data engine reject other source intervals.
+- Higher-timeframe bars are labeled at their close and backward-merged only after completion. Never backfill indicator warmup values from future rows.
+- Resampled intervals: 3m, 5m, 15m, 30m, 1h, and daily. One-hour bars are aligned to the 09:15 market-session open.
+- `add_multi_timeframe_features()` in `src/trade_ai/features.py` prepares timeframe bars, calculates and aligns all EMA features, then calculates other indicators by timeframe. Standard intraday timeframes are 1m, 3m, 5m, 15m, 30m, and 1h. EMA, ATR, volatility, and RSI are calculated for every one. To add another timeframe-based indicator, register its calculation in the non-EMA indicator map; the loop applies it across all standard timeframes. The daily macro gate remains a separate daily calculation. Indicator formulas live in separate modules under `src/trade_ai/indicator/`.
+- `FEATURE_COLUMNS` in `src/trade_ai/features.py` is authoritative. The current GRU input has 78 features: base returns; EMA 9/21/50 distances; multi-timeframe 14-bar and 7-bar ATR, volatility, 14-bar RSI, 21-bar RSI, and relative MACD (12, 26, 9) line/signal/histogram; daily macro gate; and stock metadata.
+- EMA values from higher timeframes are represented as scale-independent distances from the current close.
+- `Macro_Trend_Gate` uses completed daily closes, a 10-session SMA, the SMA slope, and price alignment: `1` bullish, `-1` bearish, `0` neutral/warming up. Inference suppresses forecasts that do not match the gate.
+- Forward-return labels are created only when `compute_normalized_features(..., include_targets=True)` is used for training. Inference must retain the newest rows with complete features.
+- A checkpoint must match the feature schema. Previous 25-, 34-, 35-, 39-, 48-, 54-, or 60-input checkpoints are incompatible; inference stays disabled until a compatible model is trained. Checkpoints are saved to `.run_cache/gru_trading_model.pth` after each successful epoch.
+
+## Training and Data
+
+- Historical minute CSVs are cached under `tickData/`, one file per ticker.
+- Training processes one ticker at a time. `SlidingWindowDataset` holds one feature matrix and returns sequence windows on demand; keep the DataLoader batching (`batch_size=256`) and avoid materializing all overlapping windows.
+- Training currently uses five epochs, sequence length five, Adam, and `ReturnWeightedBCELoss`.
+- Broker downloads use three attempts per chunk. Cached OHLCV fields pass through `standardize_columns()`.
+
+## Environment and Commands
+
+- `OPENALGO_API_KEY` is required. `OPENALGO_HOST` is optional and defaults to the configured OpenAlgo endpoint.
+- `.env` is ignored by Git, but the application does not load it automatically. Export its values into the shell before running commands, for example:
+
+  ```sh
+  set -a
+  source .env
+  set +a
+  ```
+
+- Install/sync dependencies with `uv sync`.
+- Launch the UI with `uv run python src/trade_ai/app.py`.
+- Train with `uv run python src/trade_ai/train.py`.
+- If the VPS has `noexec` temporary storage issues, use the repo-local cache as `TMPDIR` and `PIP_CACHE_DIR` (see `first-start.md`).

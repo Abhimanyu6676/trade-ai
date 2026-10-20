@@ -1,8 +1,5 @@
 # Restrict the maximum amount of virtual memory available to this shell to 2.5 Gigabytes, run below command first every time we login to new venv session
 # ulimit -v 2500000
-# OPENALGO_HOST = "https://openalgo-1.sternetsmart.com"
-# OPENALGO_API_KEY = "888c8a1c731f0847cda2b4c5a8b449e248b1305fdb304baad2e0ec7b4575dde8"
-
 import gradio as ui
 
 from trade_ai.ai_parser import extract_market_intent
@@ -60,9 +57,9 @@ with ui.Blocks(title="Proprietary AI Quant Suite") as demo:
             )
         with ui.Column(scale=1):
             interval_select = ui.Dropdown(
-                choices=["1m", "3m", "5m", "15m", "30m", "1h", "D"],
-                value="D",
-                label="Interval Timeframe",
+                choices=["1m"],
+                value="1m",
+                label="Source Candle Timeframe (aggregated to 5m and 30m)",
             )
             exchange_select = ui.Dropdown(
                 choices=["NSE", "BSE", "NFO", "MCX"],

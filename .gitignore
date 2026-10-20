@@ -10,6 +10,8 @@ __pycache__/
 # Local environment variables / API secrets (CRITICAL for security)
 .env
 .env.local
+.env.*
+!.env.example
 
 # IDE configurations
 .vscode/

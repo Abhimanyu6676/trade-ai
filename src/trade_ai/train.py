@@ -5,11 +5,10 @@ import time  # Make sure time is imported at the top of your train.py
 import numpy as np
 import pandas as pd
 import torch
-from openalgo import api
 from torch import nn, optim
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, Dataset
 
-from trade_ai.data_engine import OPENALGO_API_KEY, OPENALGO_HOST
+from trade_ai.data_engine import get_openalgo_client
 from trade_ai.features import (
     FEATURE_COLUMNS,
     STOCK_METADATA,
@@ -22,10 +21,6 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 TICK_DATA_DIR = os.path.join(BASE_DIR, "tickData")
 CACHE_DIR = os.path.join(BASE_DIR, ".run_cache")
 MODEL_PATH = os.path.join(CACHE_DIR, "gru_trading_model.pth")
-
-# Initialize OpenAlgo client
-client = api(api_key=OPENALGO_API_KEY, host=OPENALGO_HOST)
-
 
 class ReturnWeightedBCELoss(nn.Module):
     """Custom Loss Function: Aligns model training with financial expectancy
@@ -73,6 +68,7 @@ def download_and_cache_stock_history(
     """
     os.makedirs(TICK_DATA_DIR, exist_ok=True)
     stock_csv = os.path.join(TICK_DATA_DIR, f"{ticker}_history.csv")
+    client = get_openalgo_client()
 
     if os.path.exists(stock_csv):
         print(f"[{ticker}] Found local dataset in 'tickData'. Loading from disk...")
@@ -83,15 +79,12 @@ def download_and_cache_stock_history(
         )
         return df_cached
 
+    start_date = datetime.date(2020, 1, 1)
+    end_date = datetime.date.today()
     print(
         f"[{ticker}] Local cache missing. Downloading historical data from"
-        " 2020-01-01 to 2026-07-31..."
+        f" {start_date.isoformat()} to {end_date.isoformat()}..."
     )
-
-    start_date = datetime.date(2020, 1, 1)
-    target_end_date = datetime.date(2026, 7, 31)
-    today = datetime.date.today()
-    end_date = min(target_end_date, today)
 
     total_days = (end_date - start_date).days
     current_start = start_date
@@ -167,34 +160,47 @@ def download_and_cache_stock_history(
     return full_df
 
 
+class SlidingWindowDataset(Dataset):
+    """Keep one feature matrix in memory and build sequences per requested sample."""
+
+    def __init__(self, df: pd.DataFrame, sequence_length: int = 5):
+        self.features = torch.from_numpy(
+            df[FEATURE_COLUMNS].to_numpy(dtype=np.float32, copy=True)
+        )
+        self.targets = torch.from_numpy(
+            df["Target_Direction"].to_numpy(dtype=np.float32, copy=True)
+        )
+        self.returns = torch.from_numpy(
+            df["Future_Return_5m"].to_numpy(dtype=np.float32, copy=True)
+        )
+        self.sequence_length = sequence_length
+
+    def __len__(self):
+        return max(0, len(self.features) - self.sequence_length + 1)
+
+    def __getitem__(self, index):
+        target_index = index + self.sequence_length - 1
+        return (
+            self.features[index : target_index + 1],
+            self.targets[target_index].unsqueeze(0),
+            self.returns[target_index].unsqueeze(0),
+        )
+
+
 def create_batched_loader(
     df: pd.DataFrame, sequence_length: int = 5, batch_size: int = 256
 ):
-    """Converts dataframe into sliding sequences and wraps them in a memory-efficient DataLoader."""
-    data = df[FEATURE_COLUMNS].values
-    targets = df["Target_Direction"].values
-    returns = df["Future_Return_5m"].values
-
-    num_samples = len(data) - sequence_length
-    if num_samples <= 0:
+    """Build batches without materializing every overlapping sequence."""
+    dataset = SlidingWindowDataset(df, sequence_length)
+    if len(dataset) == 0:
         return None
-
-    xs, ys, rs = [], [], []
-    for i in range(num_samples):
-        xs.append(data[i : i + sequence_length])
-        ys.append(targets[i + sequence_length - 1])
-        rs.append(returns[i + sequence_length - 1])
-
-    dataset = TensorDataset(
-        torch.tensor(np.array(xs), dtype=torch.float32),
-        torch.tensor(np.array(ys), dtype=torch.float32).unsqueeze(1),
-        torch.tensor(np.array(rs), dtype=torch.float32).unsqueeze(1),
-    )
     return DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
 
 def train_model():
     """Sequential stock-by-stock training loop designed to fit within 4GB RAM limits using mini-batches."""
+    # Fail immediately with a clear message if credentials are missing.
+    get_openalgo_client()
     os.makedirs(CACHE_DIR, exist_ok=True)
     os.makedirs(TICK_DATA_DIR, exist_ok=True)
 
@@ -236,7 +242,9 @@ def train_model():
                     print(f"⚠️ Skipping {ticker}: Empty data.")
                     continue
 
-                processed_df = compute_normalized_features(raw_df, ticker)
+                processed_df = compute_normalized_features(
+                    raw_df, ticker, include_targets=True
+                )
                 if len(processed_df) <= sequence_length:
                     print(
                         f"[{ticker}] Insufficient rows after feature warmup. Skipping."
