@@ -21,7 +21,7 @@ class StockPredictionBrain(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        """Shape of x: [Batch_Size, Sequence_Length, Features_Count (232)]."""
+        """Shape of x: [Batch_Size, Sequence_Length, Features_Count (216)]."""
         out, _ = self.gru(x)
         last_sequence_step = out[:, -1, :]
         dense_out = self.relu(self.fc1(last_sequence_step))

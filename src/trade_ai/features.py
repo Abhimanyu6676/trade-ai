@@ -6,7 +6,6 @@ from trade_ai.indicator import (
     calculate_ema,
     calculate_fvg,
     calculate_liquidity,
-    calculate_macd,
     calculate_macro_trend_gate,
     calculate_rsi,
     calculate_volatility,
@@ -82,7 +81,7 @@ def add_multi_timeframe_features(df: pd.DataFrame) -> pd.DataFrame:
     """Add EMA and other indicator features, organized by calculation stage.
 
     EMA distances: 1m, 3m, 5m, 15m, 30m, and 1h (spans 9, 21, 50).
-    ATR, volatility, RSI, MACD, FVG, BAG, and liquidity features are calculated
+    ATR, volatility, RSI, FVG, BAG, and liquidity features are calculated
     on 1m, 3m, 5m, 15m, 30m, and 1h.
     The completed-daily 10-session macro gate is calculated separately.
     """
@@ -113,13 +112,24 @@ def add_multi_timeframe_features(df: pd.DataFrame) -> pd.DataFrame:
     }
 
     # Section 2: Calculate every EMA first, then align completed higher-timeframe
-    # values to the one-minute rows. All EMA model inputs are close-to-EMA ratios.
+    # values to the one-minute rows. EMA distances and the 1m pair spread are
+    # normalized by price so they are scale-independent.
     for timeframe, bars in timeframe_bars.items():
         close = bars["Close"]
         if timeframe == "1m":
             for span in (9, 21, 50):
                 ema = calculate_ema(close, span)
-                df[f"EMA_{span}_Dist"] = (df["Close"] - ema) / ema
+                ema_values = ema.to_numpy()
+                df[f"EMA_{span}_1m"] = ema_values
+                df[f"EMA_{span}_Dist"] = (
+                    df["Close"].to_numpy() - ema_values
+                ) / ema_values
+            df["EMA_9_21_Spread"] = (
+                df["EMA_9_1m"] - df["EMA_21_1m"]
+            ) / df["EMA_21_1m"]
+            df["EMA_9_21_Close_Spread"] = (
+                df["EMA_9_1m"] - df["EMA_21_1m"]
+            ) / df["Close"]
             continue
 
         ema_frame = pd.DataFrame(index=close.index)
@@ -148,16 +158,6 @@ def add_multi_timeframe_features(df: pd.DataFrame) -> pd.DataFrame:
             "RSI_14_Norm": calculate_rsi(bars["Close"], period=14),
             "RSI_21_Norm": calculate_rsi(bars["Close"], period=21),
         }
-        macd_values = calculate_macd(
-            bars["Close"], fast_period=12, slow_period=26, signal_period=9
-        )
-        indicator_values.update(
-            {
-                "MACD_Line_Pct": macd_values["MACD_Line_Pct"],
-                "MACD_Signal_Pct": macd_values["MACD_Signal_Pct"],
-                "MACD_Hist_Pct": macd_values["MACD_Hist_Pct"],
-            }
-        )
         liquidity_values = calculate_liquidity(bars)
         indicator_values.update(
             {name: liquidity_values[name] for name in liquidity_values.columns}
@@ -239,10 +239,12 @@ FEATURE_COLUMNS = [
     "Return_5m",
     "Return_15m",
     # Multi-Timeframe EMA Distances
-    ## Base EMA Distances (3)
+    ## 1m EMA Distances and 9/21 Spreads (5)
     "EMA_9_Dist",
     "EMA_21_Dist",
     "EMA_50_Dist",
+    "EMA_9_21_Spread",
+    "EMA_9_21_Close_Spread",
     ## 5m EMA Distances (3)
     "EMA_9_3m_Dist",
     "EMA_21_3m_Dist",
@@ -298,25 +300,6 @@ FEATURE_COLUMNS = [
     "RSI_21_Norm_15m",
     "RSI_21_Norm_30m",
     "RSI_21_Norm_1h",
-    # Relative MACD (12, 26, 9), all timeframes (18)
-    "MACD_Line_Pct",
-    "MACD_Signal_Pct",
-    "MACD_Hist_Pct",
-    "MACD_Line_Pct_3m",
-    "MACD_Signal_Pct_3m",
-    "MACD_Hist_Pct_3m",
-    "MACD_Line_Pct_5m",
-    "MACD_Signal_Pct_5m",
-    "MACD_Hist_Pct_5m",
-    "MACD_Line_Pct_15m",
-    "MACD_Signal_Pct_15m",
-    "MACD_Hist_Pct_15m",
-    "MACD_Line_Pct_30m",
-    "MACD_Signal_Pct_30m",
-    "MACD_Hist_Pct_30m",
-    "MACD_Line_Pct_1h",
-    "MACD_Signal_Pct_1h",
-    "MACD_Hist_Pct_1h",
     # Sweep-qualified FVG state and measurable playbook context (78)
     "FVG_Direction",
     "FVG_Size_Pct",
