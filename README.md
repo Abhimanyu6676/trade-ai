@@ -22,7 +22,7 @@ export OPENALGO_API_KEY="your-api-key"
 export OPENALGO_HOST="https://your-openalgo-host" # optional
 ```
 
-The model currently uses 80 input features. EMA 9/21/50 distances, normalized 14-bar and 7-bar ATR, volatility, 14-bar and 21-bar RSI, and relative MACD (12, 26, 9) line/signal/histogram features are calculated for 1-minute, 3-minute, 5-minute, 15-minute, 30-minute, and 1-hour bars. Cap and sector one-hot columns are generated from enums in `stock_metadata.py`, so adding an enum category updates the feature schema automatically. Feature schema changes require retraining the model. Do not commit local `.env` files.
+The model currently uses 146 input features. EMA 9/21/50 distances, normalized 14-bar and 7-bar ATR, volatility, 14-bar and 21-bar RSI, relative MACD (12, 26, 9) line/signal/histogram, Fair Value Gap, Breakaway Gap, buy-side/sell-side liquidity levels, and sweep signals are calculated for 1-minute, 3-minute, 5-minute, 15-minute, 30-minute, and 1-hour bars. FVG requires an opposing-side sweep before its three-candle gap; BAG requires a one-candle gap and a breakout over the prior 20-bar range. FVG midpoint distance is relative to close, and a close through the far edge marks an inverse FVG. Feature schema changes require retraining the model. Do not commit local `.env` files.
 
 ---
 

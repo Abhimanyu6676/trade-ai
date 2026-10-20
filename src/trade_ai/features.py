@@ -2,7 +2,10 @@ import pandas as pd
 
 from trade_ai.indicator import (
     calculate_atr_pct,
+    calculate_bag,
     calculate_ema,
+    calculate_fvg,
+    calculate_liquidity,
     calculate_macd,
     calculate_macro_trend_gate,
     calculate_rsi,
@@ -78,7 +81,8 @@ def add_multi_timeframe_features(df: pd.DataFrame) -> pd.DataFrame:
     """Add EMA and other indicator features, organized by calculation stage.
 
     EMA distances: 1m, 3m, 5m, 15m, 30m, and 1h (spans 9, 21, 50).
-    ATR, volatility, and RSI are calculated on 1m, 3m, 5m, 15m, 30m, and 1h.
+    ATR, volatility, RSI, MACD, FVG, BAG, and liquidity features are calculated
+    on 1m, 3m, 5m, 15m, 30m, and 1h.
     The completed-daily 10-session macro gate is calculated separately.
     """
     # Section 1: Prepare sorted one-minute candles and their timeframe closes.
@@ -153,6 +157,18 @@ def add_multi_timeframe_features(df: pd.DataFrame) -> pd.DataFrame:
                 "MACD_Hist_Pct": macd_values["MACD_Hist_Pct"],
             }
         )
+        liquidity_values = calculate_liquidity(bars)
+        indicator_values.update(
+            {name: liquidity_values[name] for name in liquidity_values.columns}
+        )
+        fvg_values = calculate_fvg(bars, liquidity_values=liquidity_values)
+        indicator_values.update(
+            {name: fvg_values[name] for name in fvg_values.columns}
+        )
+        bag_values = calculate_bag(bars)
+        indicator_values.update(
+            {name: bag_values[name] for name in bag_values.columns}
+        )
         for base_name, values in indicator_values.items():
             feature_name = (
                 base_name if timeframe == "1m" else f"{base_name}_{timeframe}"
@@ -200,7 +216,7 @@ def compute_normalized_features(
     return df.dropna(subset=required_columns)
 
 
-# Complete Feature Schema Definition (80 Features)
+# Complete Feature Schema Definition (146 Features)
 FEATURE_COLUMNS = [
     # Percentage Returns (3)
     "Return_1m",
@@ -285,6 +301,75 @@ FEATURE_COLUMNS = [
     "MACD_Line_Pct_1h",
     "MACD_Signal_Pct_1h",
     "MACD_Hist_Pct_1h",
+    # Latest Fair Value Gap state, including inverse status (24)
+    "FVG_Direction",
+    "FVG_Size_Pct",
+    "FVG_Distance_Pct",
+    "FVG_Is_Inverse",
+    "FVG_Direction_3m",
+    "FVG_Size_Pct_3m",
+    "FVG_Distance_Pct_3m",
+    "FVG_Is_Inverse_3m",
+    "FVG_Direction_5m",
+    "FVG_Size_Pct_5m",
+    "FVG_Distance_Pct_5m",
+    "FVG_Is_Inverse_5m",
+    "FVG_Direction_15m",
+    "FVG_Size_Pct_15m",
+    "FVG_Distance_Pct_15m",
+    "FVG_Is_Inverse_15m",
+    "FVG_Direction_30m",
+    "FVG_Size_Pct_30m",
+    "FVG_Distance_Pct_30m",
+    "FVG_Is_Inverse_30m",
+    "FVG_Direction_1h",
+    "FVG_Size_Pct_1h",
+    "FVG_Distance_Pct_1h",
+    "FVG_Is_Inverse_1h",
+    # Latest unfilled Breakaway Gap state, relative to close (18)
+    "BAG_Direction",
+    "BAG_Size_Pct",
+    "BAG_Distance_Pct",
+    "BAG_Direction_3m",
+    "BAG_Size_Pct_3m",
+    "BAG_Distance_Pct_3m",
+    "BAG_Direction_5m",
+    "BAG_Size_Pct_5m",
+    "BAG_Distance_Pct_5m",
+    "BAG_Direction_15m",
+    "BAG_Size_Pct_15m",
+    "BAG_Distance_Pct_15m",
+    "BAG_Direction_30m",
+    "BAG_Size_Pct_30m",
+    "BAG_Distance_Pct_30m",
+    "BAG_Direction_1h",
+    "BAG_Size_Pct_1h",
+    "BAG_Distance_Pct_1h",
+    # Nearest confirmed liquidity levels and sweep events (24)
+    "BSL_Distance_Pct",
+    "SSL_Distance_Pct",
+    "BSL_Sweep",
+    "SSL_Sweep",
+    "BSL_Distance_Pct_3m",
+    "SSL_Distance_Pct_3m",
+    "BSL_Sweep_3m",
+    "SSL_Sweep_3m",
+    "BSL_Distance_Pct_5m",
+    "SSL_Distance_Pct_5m",
+    "BSL_Sweep_5m",
+    "SSL_Sweep_5m",
+    "BSL_Distance_Pct_15m",
+    "SSL_Distance_Pct_15m",
+    "BSL_Sweep_15m",
+    "SSL_Sweep_15m",
+    "BSL_Distance_Pct_30m",
+    "SSL_Distance_Pct_30m",
+    "BSL_Sweep_30m",
+    "SSL_Sweep_30m",
+    "BSL_Distance_Pct_1h",
+    "SSL_Distance_Pct_1h",
+    "BSL_Sweep_1h",
+    "SSL_Sweep_1h",
     # Macro Trend Gate (1)
     "Macro_Trend_Gate",
     # One-hot metadata feature columns generated from the metadata enums.
