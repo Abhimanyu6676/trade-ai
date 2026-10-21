@@ -81,11 +81,14 @@ Before launching the app or training, confirm:
 
 ## Common Commands
 
-Start the Gradio UI on port 7860:
+Start the Gradio UI on port 7860 and the FastAPI server on port 3010:
 
 ```sh
 uv run python src/trade_ai/app.py
 ```
+
+The FastAPI server runs Uvicorn in a background thread. Its `GET /` endpoint
+returns `{"message": "Hello, World!"}`. Stop both services with `Ctrl+C`.
 
 On hosts where the default temporary directory is mounted `noexec`, set repository-local temporary/cache paths before starting:
 

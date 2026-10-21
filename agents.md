@@ -13,6 +13,7 @@ Last reviewed: 2026-10-21.
 - When behavior, architecture, model inputs, startup, environment requirements, or operational gotchas change, update the relevant sections of `context.md` in the same change.
 - Update `setup-start.md` when setup or startup instructions change. 
 - Update `readme.md` when the project summary, major capabilities, or structure changes.
+- Update `server.md` whenever an endpoint is added or modified
 - Keep this file limited to agent workflow and repository maintenance instructions.
 - Never write credential values, tokens, or private environment values into tracked files or logs.
 - Do not add or run tests unless the user asks. No test command is currently configured in `pyproject.toml`.

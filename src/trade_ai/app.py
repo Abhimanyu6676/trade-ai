@@ -5,6 +5,7 @@ import gradio as ui
 from trade_ai.ai_parser import extract_market_intent
 from trade_ai.data_engine import fetch_and_clean_candles, get_openalgo_status_message
 from trade_ai.prediction_engine import reset_prediction_brain
+from trade_ai.server.server import start_server
 
 
 def controller_pipeline(user_query: str, interval: str, exchange: str):
@@ -114,4 +115,5 @@ with ui.Blocks(title="Proprietary AI Quant Suite") as demo:
     )
 
 if __name__ == "__main__":
+    start_server()
     demo.launch(server_name="0.0.0.0", server_port=7860, share=False)

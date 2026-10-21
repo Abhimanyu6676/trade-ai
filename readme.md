@@ -49,6 +49,9 @@ trade-ai/
     ├── stock_metadata.py     # Stock category and ticker metadata
     ├── train.py              # Model training
     ├── util.py               # Shared data utilities
+    ├── server                # Python server directory
+        ├── server.md         # holds the server endpoints notes and description
+        ├── server.py         # Main server File
     └── indicator/            # Indicator calculations and notes
 ```
 

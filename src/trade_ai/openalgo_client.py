@@ -8,7 +8,6 @@ from openalgo import api
 
 from trade_ai.util import standardize_ohlcv_columns
 
-
 DEFAULT_OPENALGO_HOST = "https://openalgo-1.sternetsmart.com"
 
 

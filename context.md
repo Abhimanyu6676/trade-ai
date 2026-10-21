@@ -7,13 +7,14 @@ Last reviewed: 2026-10-21.
 A Python/`uv` project for market-data analysis and GRU-based directional forecasts. The current app does not place broker orders.
 
 1. `src/trade_ai/app.py` accepts prompts and presents results through Gradio on port 7860.
-2. `ai_parser.py` uses local Ollama `qwen2.5:0.5b` to extract actions, tickers, and lookback days. It detects supported reset and training commands before calling Ollama. Its date anchor comes from the system date at process startup.
-3. `openalgo_client.py` owns the shared OpenAlgo client and performs history/status API calls.
-4. `data_engine.py` requests candles through that client and builds features; `prediction_engine.py` owns model loading, lifecycle, and inference.
-5. `util.py` provides shared OHLCV normalization for inference, downloaded data, and CSV cache reads.
-6. `features.py` builds normalized base and multi-timeframe inputs using indicator formulas from `src/trade_ai/indicator/`.
-7. `stock_metadata.py` defines enum-backed cap and sector categories, ticker mappings, defaults, and categorical encoding.
-8. `model.py` defines the GRU classifier; `train.py` requests history, normalizes/caches it, and trains the model.
+2. `src/trade_ai/server/server.py` exposes a FastAPI hello-world endpoint and mounts `GET` and `POST /api/chat` routes from `chat_route.py` on port 3010. Uvicorn runs in a background thread started by `app.py`.
+3. `ai_parser.py` uses local Ollama `qwen2.5:0.5b` to extract actions, tickers, and lookback days. It detects supported reset and training commands before calling Ollama. Its date anchor comes from the system date at process startup.
+4. `openalgo_client.py` owns the shared OpenAlgo client and performs history/status API calls.
+5. `data_engine.py` requests candles through that client and builds features; `prediction_engine.py` owns model loading, lifecycle, and inference.
+6. `util.py` provides shared OHLCV normalization for inference, downloaded data, and CSV cache reads.
+7. `features.py` builds normalized base and multi-timeframe inputs using indicator formulas from `src/trade_ai/indicator/`.
+8. `stock_metadata.py` defines enum-backed cap and sector categories, ticker mappings, defaults, and categorical encoding.
+9. `model.py` defines the GRU classifier; `train.py` requests history, normalizes/caches it, and trains the model.
 
 ## Data and Feature Contract
 
@@ -60,7 +61,7 @@ A Python/`uv` project for market-data analysis and GRU-based directional forecas
   ```
 
 - Install/sync dependencies with `uv sync`.
-- Launch the UI with `uv run python src/trade_ai/app.py`.
+- Launch the Gradio UI with `uv run python src/trade_ai/app.py`; it also starts the FastAPI server on port 3010.
 - Train with `uv run python src/trade_ai/train.py`.
 - From the running UI, enter “start training” to launch the same training job in the background; check the app server console for progress.
 - If the VPS has `noexec` temporary storage issues, use the repo-local cache as `TMPDIR` and `PIP_CACHE_DIR`; detailed steps are in `setup-start.md`.

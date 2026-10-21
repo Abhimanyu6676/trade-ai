@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pandas as pd
 
-
 _OHLCV_COLUMN_NAMES = {
     "timestamp": "Timestamp",
     "open": "Open",
