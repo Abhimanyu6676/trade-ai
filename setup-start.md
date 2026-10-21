@@ -12,6 +12,7 @@ Update it when setup or startup steps change, or when a new setup/start check is
 - `uv` for dependency and project environment management.
 - Ollama running locally with the `qwen2.5:0.5b` model available for prompt parsing.
 - An OpenAlgo endpoint and API key for market-data access.
+- nodemon installed globally for development hot reloads ```npm i -g nodemon```
 
 ## Initial Setup
 
