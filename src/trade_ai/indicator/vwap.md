@@ -34,4 +34,12 @@ Institutions (like mutual funds, hedge funds, and pension managers) move massive
 - Minimizing Market Impact: Instead of using aggressive market orders, institutional execution algos attempt to match or trade around the VWAP curve to stay invisible and reduce slippage.
 - Dynamic Support and Resistance: During strong trends, institutional algorithms often treat pullbacks back to the VWAP line as fair-value accumulation zones, causing price to bounce off the line.
 - Standard Deviation Bands: Pros plot standard deviation bands (± 1σ, ± 2σ, etc.) around VWAP to measure statistical extremes (overbought or oversold conditions relative to volume-weighted fair value).
-You can read more about tracking volume-weighted metrics via Charles Schwab or explore platform mechanics on Dhan.
+
+
+## Implementation Notes
+
+Implement this indicator in the ratio as other indicators are in ratio
+
+VWAP should also be converted into a relative ratio or percentage distance
+
+Keeping VWAP expressed as a relative distance maintains total consistency with your relative EMA distances, ATR percentages, and your new ORB feature distances!
