@@ -14,7 +14,11 @@ from trade_ai.features import (
     FEATURE_COLUMNS,
     compute_normalized_features,
 )
-from trade_ai.model import StockPredictionBrain
+from trade_ai.model import (
+    StockPredictionBrain,
+    load_model_checkpoint,
+    save_model_checkpoint,
+)
 from trade_ai.openalgo_client import openalgo
 from trade_ai.stock_metadata import STOCK_METADATA
 from trade_ai.util import load_cached_ohlcv
@@ -223,12 +227,10 @@ def train_model() -> int:
     # Load existing weights if resuming from a checkpoint
     if os.path.exists(MODEL_PATH):
         try:
-            model.load_state_dict(
-                torch.load(MODEL_PATH, map_location=torch.device("cpu"))
-            )
+            load_model_checkpoint(model, MODEL_PATH)
             print(f"📂 Loaded existing checkpoint weights from {MODEL_PATH}")
-        except Exception:
-            pass
+        except Exception as error:
+            print(f"⚠️ Ignoring incompatible checkpoint: {error}. Training from scratch.")
 
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     model.train()
@@ -336,7 +338,7 @@ def train_model() -> int:
             print(f"Epoch {epoch + 1} Complete. Average Loss: {avg_loss:.4f}")
 
             # Checkpoint save after every successful epoch
-            torch.save(model.state_dict(), MODEL_PATH)
+            save_model_checkpoint(model, MODEL_PATH)
             successful_epochs += 1
             print(
                 f"💾 Checkpoint saved: Model weights updated for Epoch {epoch + 1} -> {MODEL_PATH}"

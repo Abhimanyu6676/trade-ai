@@ -2,14 +2,11 @@ import pandas as pd
 
 from trade_ai.indicator import (
     calculate_atr_pct,
-    calculate_bag,
     calculate_ema,
-    calculate_fvg,
-    calculate_liquidity,
     calculate_macro_trend_gate,
+    calculate_orb,
     calculate_rsi,
     calculate_volatility,
-    detect_fvg_events,
 )
 from trade_ai.stock_metadata import (
     METADATA_FEATURE_COLUMNS,
@@ -83,8 +80,9 @@ def add_multi_timeframe_features(df: pd.DataFrame) -> pd.DataFrame:
     """Add EMA and other indicator features, organized by calculation stage.
 
     EMA distances: 1m, 3m, 5m, 15m, 30m, and 1h (spans 9, 21, 50).
-    ATR, volatility, RSI, FVG, BAG, and liquidity features are calculated
-    on 1m, 3m, 5m, 15m, 30m, and 1h.
+    ATR, volatility, and RSI features are calculated on 1m, 3m, 5m, 15m, 30m,
+    and 1h.
+    ORB features use the first 15m, 30m, and 1h from the NSE session open.
     The completed-daily 10-session macro gate is calculated separately.
     """
     # Section 1: Prepare sorted one-minute candles and their timeframe closes.
@@ -160,35 +158,20 @@ def add_multi_timeframe_features(df: pd.DataFrame) -> pd.DataFrame:
             "RSI_14_Norm": calculate_rsi(bars["Close"], period=14),
             "RSI_21_Norm": calculate_rsi(bars["Close"], period=21),
         }
-        liquidity_values = calculate_liquidity(bars)
-        indicator_values.update(
-            {name: liquidity_values[name] for name in liquidity_values.columns}
-        )
-        fvg_events = detect_fvg_events(bars, liquidity_values=liquidity_values)
-        fvg_values = calculate_fvg(
-            bars, liquidity_values=liquidity_values, fvg_events=fvg_events
-        )
-        indicator_values.update(
-            {name: fvg_values[name] for name in fvg_values.columns}
-        )
-        bag_values = calculate_bag(
-            bars, fvg_events=fvg_events, liquidity_values=liquidity_values
-        )
-        indicator_values.update(
-            {name: bag_values[name] for name in bag_values.columns}
-        )
         indicator_frame = pd.DataFrame(indicator_values)
         df = _merge_timeframe_features(df, indicator_frame, timeframe)
 
-    # Compare the current 1m footprint with the latest completed 15m and 1h
-    # footprint directions. This is a directional HTF-context proxy; it does
-    # not claim to detect discretionary demand/supply blocks.
-    df["FVG_HTF_Alignment"] = df["FVG_Direction"] * (
-        df["FVG_Direction_15m"] + df["FVG_Direction_1h"]
-    ) / 2
-    df["BAG_HTF_Alignment"] = df["BAG_Direction"] * (
-        df["BAG_Direction_15m"] + df["BAG_Direction_1h"]
-    ) / 2
+    # Opening ranges are measured from one-minute candles starting at the NSE
+    # open. Each range is only exposed after its full opening window completes.
+    for window_minutes, window_label in (
+        (15, "15m"),
+        (30, "30m"),
+        (60, "1h"),
+    ):
+        orb_values = calculate_orb(
+            temp_df, window_minutes, window_label=window_label
+        )
+        df = _merge_timeframe_features(df, orb_values, "1m")
 
     # Daily: gate on completed daily close vs 10-session SMA and its slope.
     daily_close = _resample_close(temp_df["Close"], "1D")
@@ -299,162 +282,22 @@ FEATURE_COLUMNS = [
     "RSI_21_Norm_15m",
     "RSI_21_Norm_30m",
     "RSI_21_Norm_1h",
-    # Sweep-qualified FVG state and measurable playbook context (78)
-    "FVG_Direction",
-    "FVG_Size_Pct",
-    "FVG_Distance_Pct",
-    "FVG_Is_Inverse",
-    "FVG_Displacement_ATR",
-    "FVG_Structure_Break",
-    "FVG_In_Killzone",
-    "FVG_Setup_Qualified",
-    "FVG_Retest_Depth",
-    "FVG_CE_Touched",
-    "FVG_Entry_Edge_Distance_Pct",
-    "FVG_Stop_Distance_Pct",
-    "FVG_Target_Liquidity_Distance_Pct",
-    "FVG_Direction_3m",
-    "FVG_Size_Pct_3m",
-    "FVG_Distance_Pct_3m",
-    "FVG_Is_Inverse_3m",
-    "FVG_Displacement_ATR_3m",
-    "FVG_Structure_Break_3m",
-    "FVG_In_Killzone_3m",
-    "FVG_Setup_Qualified_3m",
-    "FVG_Retest_Depth_3m",
-    "FVG_CE_Touched_3m",
-    "FVG_Entry_Edge_Distance_Pct_3m",
-    "FVG_Stop_Distance_Pct_3m",
-    "FVG_Target_Liquidity_Distance_Pct_3m",
-    "FVG_Direction_5m",
-    "FVG_Size_Pct_5m",
-    "FVG_Distance_Pct_5m",
-    "FVG_Is_Inverse_5m",
-    "FVG_Displacement_ATR_5m",
-    "FVG_Structure_Break_5m",
-    "FVG_In_Killzone_5m",
-    "FVG_Setup_Qualified_5m",
-    "FVG_Retest_Depth_5m",
-    "FVG_CE_Touched_5m",
-    "FVG_Entry_Edge_Distance_Pct_5m",
-    "FVG_Stop_Distance_Pct_5m",
-    "FVG_Target_Liquidity_Distance_Pct_5m",
-    "FVG_Direction_15m",
-    "FVG_Size_Pct_15m",
-    "FVG_Distance_Pct_15m",
-    "FVG_Is_Inverse_15m",
-    "FVG_Displacement_ATR_15m",
-    "FVG_Structure_Break_15m",
-    "FVG_In_Killzone_15m",
-    "FVG_Setup_Qualified_15m",
-    "FVG_Retest_Depth_15m",
-    "FVG_CE_Touched_15m",
-    "FVG_Entry_Edge_Distance_Pct_15m",
-    "FVG_Stop_Distance_Pct_15m",
-    "FVG_Target_Liquidity_Distance_Pct_15m",
-    "FVG_Direction_30m",
-    "FVG_Size_Pct_30m",
-    "FVG_Distance_Pct_30m",
-    "FVG_Is_Inverse_30m",
-    "FVG_Displacement_ATR_30m",
-    "FVG_Structure_Break_30m",
-    "FVG_In_Killzone_30m",
-    "FVG_Setup_Qualified_30m",
-    "FVG_Retest_Depth_30m",
-    "FVG_CE_Touched_30m",
-    "FVG_Entry_Edge_Distance_Pct_30m",
-    "FVG_Stop_Distance_Pct_30m",
-    "FVG_Target_Liquidity_Distance_Pct_30m",
-    "FVG_Direction_1h",
-    "FVG_Size_Pct_1h",
-    "FVG_Distance_Pct_1h",
-    "FVG_Is_Inverse_1h",
-    "FVG_Displacement_ATR_1h",
-    "FVG_Structure_Break_1h",
-    "FVG_In_Killzone_1h",
-    "FVG_Setup_Qualified_1h",
-    "FVG_Retest_Depth_1h",
-    "FVG_CE_Touched_1h",
-    "FVG_Entry_Edge_Distance_Pct_1h",
-    "FVG_Stop_Distance_Pct_1h",
-    "FVG_Target_Liquidity_Distance_Pct_1h",
-    # Latest active BAG state and playbook execution context (48)
-    "BAG_Direction",
-    "BAG_Size_Pct",
-    "BAG_Distance_Pct",
-    "BAG_Rejection",
-    "BAG_Retest_Depth",
-    "BAG_Stop_Distance_Pct",
-    "BAG_Target_Liquidity_Distance_Pct",
-    "BAG_Reversal_Displacement_ATR",
-    "BAG_Direction_3m",
-    "BAG_Size_Pct_3m",
-    "BAG_Distance_Pct_3m",
-    "BAG_Rejection_3m",
-    "BAG_Retest_Depth_3m",
-    "BAG_Stop_Distance_Pct_3m",
-    "BAG_Target_Liquidity_Distance_Pct_3m",
-    "BAG_Reversal_Displacement_ATR_3m",
-    "BAG_Direction_5m",
-    "BAG_Size_Pct_5m",
-    "BAG_Distance_Pct_5m",
-    "BAG_Rejection_5m",
-    "BAG_Retest_Depth_5m",
-    "BAG_Stop_Distance_Pct_5m",
-    "BAG_Target_Liquidity_Distance_Pct_5m",
-    "BAG_Reversal_Displacement_ATR_5m",
-    "BAG_Direction_15m",
-    "BAG_Size_Pct_15m",
-    "BAG_Distance_Pct_15m",
-    "BAG_Rejection_15m",
-    "BAG_Retest_Depth_15m",
-    "BAG_Stop_Distance_Pct_15m",
-    "BAG_Target_Liquidity_Distance_Pct_15m",
-    "BAG_Reversal_Displacement_ATR_15m",
-    "BAG_Direction_30m",
-    "BAG_Size_Pct_30m",
-    "BAG_Distance_Pct_30m",
-    "BAG_Rejection_30m",
-    "BAG_Retest_Depth_30m",
-    "BAG_Stop_Distance_Pct_30m",
-    "BAG_Target_Liquidity_Distance_Pct_30m",
-    "BAG_Reversal_Displacement_ATR_30m",
-    "BAG_Direction_1h",
-    "BAG_Size_Pct_1h",
-    "BAG_Distance_Pct_1h",
-    "BAG_Rejection_1h",
-    "BAG_Retest_Depth_1h",
-    "BAG_Stop_Distance_Pct_1h",
-    "BAG_Target_Liquidity_Distance_Pct_1h",
-    "BAG_Reversal_Displacement_ATR_1h",
-    # HTF footprint direction agreement with the active 1m footprint.
-    "FVG_HTF_Alignment",
-    "BAG_HTF_Alignment",
-    # Nearest confirmed liquidity levels and sweep events (24)
-    "BSL_Distance_Pct",
-    "SSL_Distance_Pct",
-    "BSL_Sweep",
-    "SSL_Sweep",
-    "BSL_Distance_Pct_3m",
-    "SSL_Distance_Pct_3m",
-    "BSL_Sweep_3m",
-    "SSL_Sweep_3m",
-    "BSL_Distance_Pct_5m",
-    "SSL_Distance_Pct_5m",
-    "BSL_Sweep_5m",
-    "SSL_Sweep_5m",
-    "BSL_Distance_Pct_15m",
-    "SSL_Distance_Pct_15m",
-    "BSL_Sweep_15m",
-    "SSL_Sweep_15m",
-    "BSL_Distance_Pct_30m",
-    "SSL_Distance_Pct_30m",
-    "BSL_Sweep_30m",
-    "SSL_Sweep_30m",
-    "BSL_Distance_Pct_1h",
-    "SSL_Distance_Pct_1h",
-    "BSL_Sweep_1h",
-    "SSL_Sweep_1h",
+    # Opening Range Breakout context (5 features per range)
+    "ORB_15m_Range_Pct",
+    "ORB_15m_High_Distance_Pct",
+    "ORB_15m_Low_Distance_Pct",
+    "ORB_15m_Midpoint_Distance_Pct",
+    "ORB_15m_Breakout_Direction",
+    "ORB_30m_Range_Pct",
+    "ORB_30m_High_Distance_Pct",
+    "ORB_30m_Low_Distance_Pct",
+    "ORB_30m_Midpoint_Distance_Pct",
+    "ORB_30m_Breakout_Direction",
+    "ORB_1h_Range_Pct",
+    "ORB_1h_High_Distance_Pct",
+    "ORB_1h_Low_Distance_Pct",
+    "ORB_1h_Midpoint_Distance_Pct",
+    "ORB_1h_Breakout_Direction",
     # Macro Trend Gate (1)
     "Macro_Trend_Gate",
     # One-hot metadata feature columns generated from the metadata enums.

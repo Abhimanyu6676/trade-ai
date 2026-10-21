@@ -8,7 +8,7 @@ import pandas as pd
 import torch
 
 from trade_ai.features import FEATURE_COLUMNS
-from trade_ai.model import StockPredictionBrain
+from trade_ai.model import StockPredictionBrain, load_model_checkpoint
 
 # Path configuration for the trained model weights.
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -25,9 +25,7 @@ MODEL_READY = False
 # Automatically load trained checkpoint weights if available.
 if os.path.exists(MODEL_PATH):
     try:
-        prediction_ai.load_state_dict(
-            torch.load(MODEL_PATH, map_location=torch.device("cpu"))
-        )
+        load_model_checkpoint(prediction_ai, MODEL_PATH)
         MODEL_READY = True
         print(
             f"✅ [Prediction Engine] Successfully loaded trained weights from: {MODEL_PATH}"
@@ -115,9 +113,7 @@ def reload_prediction_brain() -> bool:
             loaded_model = StockPredictionBrain(
                 input_dim=len(FEATURE_COLUMNS), hidden_dim=32, num_layers=2
             )
-            loaded_model.load_state_dict(
-                torch.load(MODEL_PATH, map_location=torch.device("cpu"))
-            )
+            load_model_checkpoint(loaded_model, MODEL_PATH)
             loaded_model.eval()
         except Exception as error:
             print(f"⚠️ [Prediction Engine] Failed to load checkpoint: {error}")
