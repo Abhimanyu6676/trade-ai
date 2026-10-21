@@ -115,5 +115,13 @@ with ui.Blocks(title="Proprietary AI Quant Suite") as demo:
     )
 
 if __name__ == "__main__":
-    start_server()
-    demo.launch(server_name="0.0.0.0", server_port=7860, share=False)
+    try:
+        # Your existing launch command
+        start_server()
+        demo.launch(server_name="0.0.0.0", server_port=7860, share=False)
+    except KeyboardInterrupt, SystemExit:
+        print("\n[INFO] Shutting down Gradio interface safely...")
+        # Optional: Force clean exit of any lingering PyTorch/Gradio threads
+        import os
+
+        os._exit(0)

@@ -87,6 +87,18 @@ Start the Gradio UI on port 7860 and the FastAPI server on port 3010:
 uv run python src/trade_ai/app.py
 ```
 
+For development, Run:
+
+```sh
+nodemon --watch . --ext py --exec "uv run python src/trade_ai/app.py"
+```
+
+OR run from project root, as we have setup `nodemon.json`
+
+```sh
+nodemon
+```
+
 The FastAPI server runs Uvicorn in a background thread. Its `GET /` endpoint
 returns `{"message": "Hello, World!"}`. Stop both services with `Ctrl+C`.
 

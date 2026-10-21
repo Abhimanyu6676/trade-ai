@@ -1,0 +1,13 @@
+{
+  "exec": "uv run python src/trade_ai/app.py",
+  "ext": "py",
+  "signal": "SIGTERM",
+  "watch": ["."],
+  "ignore": [
+    ".venv/**",
+    "venv/**",
+    "__pycache__/**",
+    ".git/**",
+    "tests/**"
+  ]
+}
