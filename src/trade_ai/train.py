@@ -29,19 +29,26 @@ TRAINING_STATE = "idle"
 TRAINING_ERROR = None
 
 class ReturnWeightedBCELoss(nn.Module):
-    """Custom Loss Function: Aligns model training with financial expectancy
+    """Balance direction classes and emphasize meaningful forward returns."""
 
-    rather than raw classification accuracy by weighting errors proportional
-    to the magnitude of the actual future return.
-    """
-
-    def __init__(self):
+    def __init__(self, positive_weight: float):
         super().__init__()
         self.bce = nn.BCELoss(reduction="none")
+        self.positive_weight = positive_weight
 
     def forward(self, predictions, targets, future_returns):
         bce_loss = self.bce(predictions, targets)
-        weights = torch.abs(future_returns) + 1e-4
+        # Five-minute returns are small decimals. Scale them before adding a
+        # unit baseline so return weighting cannot shrink gradients toward zero.
+        return_weights = torch.abs(future_returns) * 1000.0 + 1.0
+        class_weights = torch.where(
+            targets > 0.5,
+            torch.as_tensor(
+                self.positive_weight, dtype=targets.dtype, device=targets.device
+            ),
+            1.0,
+        )
+        weights = return_weights * class_weights
         return torch.mean(bce_loss * weights)
 
 
@@ -223,8 +230,6 @@ def train_model() -> int:
             pass
 
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    criterion = ReturnWeightedBCELoss()
-
     model.train()
     epochs = 5
     sequence_length = 5
@@ -262,14 +267,44 @@ def train_model() -> int:
                 if loader is None:
                     continue
 
+                # Balance positive and non-positive direction labels using
+                # the full ticker dataset, rather than noisy per-batch ratios.
+                target_indices = slice(sequence_length - 1, None)
+                training_targets = loader.dataset.targets[target_indices]
+                positive_count = int((training_targets > 0.5).sum().item())
+                negative_count = len(training_targets) - positive_count
+                if positive_count == 0 or negative_count == 0:
+                    print(
+                        f"⚠️ Skipping {ticker}: training labels contain only one"
+                        " direction class."
+                    )
+                    continue
+
+                positive_weight = min(negative_count / positive_count, 10.0)
+                criterion = ReturnWeightedBCELoss(positive_weight)
+                print(
+                    f"[{ticker}] Direction labels: {positive_count:,} positive / "
+                    f"{negative_count:,} non-positive; positive class weight: "
+                    f"{positive_weight:.2f}"
+                )
+
                 ticker_loss = 0.0
                 batches = 0
+                prediction_min = float("inf")
+                prediction_max = float("-inf")
+                prediction_sum = 0.0
+                prediction_count = 0
 
                 # Train batch by batch
                 for batch_X, batch_y, batch_r in loader:
                     optimizer.zero_grad()
                     preds = model(batch_X)
                     loss = criterion(preds, batch_y, batch_r)
+
+                    prediction_min = min(prediction_min, preds.min().item())
+                    prediction_max = max(prediction_max, preds.max().item())
+                    prediction_sum += preds.sum().item()
+                    prediction_count += preds.numel()
 
                     loss.backward()
                     optimizer.step()
@@ -283,6 +318,12 @@ def train_model() -> int:
                 print(
                     f"✅ Successfully trained on {ticker} | Avg Loss: {avg_ticker_loss:.4f}"
                 )
+                if prediction_count:
+                    print(
+                        f"[{ticker}] Prediction probabilities: min="
+                        f"{prediction_min:.4f}, max={prediction_max:.4f}, "
+                        f"mean={prediction_sum / prediction_count:.4f}"
+                    )
 
             except Exception as e:
                 print(f"❌ Error training on {ticker}: {e}")

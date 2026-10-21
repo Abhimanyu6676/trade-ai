@@ -1,6 +1,6 @@
 # trade-ai Agent Guide
 
-Last reviewed: 2026-10-20. Treat this as the short, source-checked handoff for the repository; read only task-relevant files after this guide.
+Last reviewed: 2026-10-21. Treat this as the short, source-checked handoff for the repository; read only task-relevant files after this guide.
 
 ## Maintenance
 
@@ -45,7 +45,8 @@ Last reviewed: 2026-10-20. Treat this as the short, source-checked handoff for t
 
 - Historical minute CSVs are cached under `tickData/`, one file per ticker.
 - Training processes one ticker at a time. `SlidingWindowDataset` holds one feature matrix and returns sequence windows on demand; keep the DataLoader batching (`batch_size=256`) and avoid materializing all overlapping windows.
-- Training currently uses five epochs, sequence length five, Adam, and `ReturnWeightedBCELoss`.
+- Training currently uses five epochs, sequence length five, Adam, and `ReturnWeightedBCELoss`. The loss scales the absolute five-minute return by 1000 with a unit baseline, applies a positive-class weight computed per ticker (capped at 10), and multiplies those weights. Tickers with only one direction label are skipped. Training prints positive/non-positive label counts and min/max/mean prediction probabilities once per ticker and epoch.
+- Direction targets remain binary (`Future_Return_5m > 0`); they are not triple-barrier labels and do not encode a neutral class. Probability diagnostics are intended to show training behavior, not to force high-confidence forecasts.
 - Broker downloads use three attempts per chunk. OpenAlgo history is standardized by `openalgo.get_history()`; legacy cached OHLCV CSVs use `load_cached_ohlcv()`.
 
 ## Environment and Commands
