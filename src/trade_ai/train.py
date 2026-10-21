@@ -2,6 +2,7 @@ import datetime
 import os
 import threading
 import time  # Make sure time is imported at the top of your train.py
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -270,7 +271,8 @@ def train_model() -> int:
                 # Balance positive and non-positive direction labels using
                 # the full ticker dataset, rather than noisy per-batch ratios.
                 target_indices = slice(sequence_length - 1, None)
-                training_targets = loader.dataset.targets[target_indices]
+                training_dataset = cast(SlidingWindowDataset, loader.dataset)
+                training_targets = training_dataset.targets[target_indices]
                 positive_count = int((training_targets > 0.5).sum().item())
                 negative_count = len(training_targets) - positive_count
                 if positive_count == 0 or negative_count == 0:
