@@ -38,8 +38,15 @@ Institutions (like mutual funds, hedge funds, and pension managers) move massive
 
 ## Implementation Notes
 
-Implement this indicator in the ratio as other indicators are in ratio
+- Implement this indicator in the ratio as other indicators are in ratio
 
-VWAP should also be converted into a relative ratio or percentage distance
+- VWAP should also be converted into a relative ratio or percentage distance
 
-Keeping VWAP expressed as a relative distance maintains total consistency with your relative EMA distances, ATR percentages, and your new ORB feature distances!
+- Keeping VWAP expressed as a relative distance maintains total consistency with your relative EMA distances, ATR percentages, and your new ORB feature distances!
+
+- Also,  Add `VWAP Rate of Change (The Slope)`
+  Instead of looking at the absolute value of VWAP, you measure how fast VWAP is rising or falling over a specific lookback window (e.g., 5 candles ago):
+
+  ```VWAP_Slope_Pct= (VWAP − VWAP.shift(5)) / VWAP```
+
+  - Why it helps: A positive percentage tells the model that institutional volume is actively driving the average price upward (an uptrend), while a negative percentage indicates a declining volume-weighted trend.

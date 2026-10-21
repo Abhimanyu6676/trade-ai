@@ -3,7 +3,7 @@ from torch import nn
 
 from trade_ai.features import FEATURE_COLUMNS
 
-FEATURE_SCHEMA_VERSION = 1
+FEATURE_SCHEMA_VERSION = 3
 
 
 def save_model_checkpoint(model: nn.Module, path: str) -> None:

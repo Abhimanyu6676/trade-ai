@@ -7,6 +7,7 @@ from trade_ai.indicator import (
     calculate_orb,
     calculate_rsi,
     calculate_volatility,
+    calculate_vwap,
 )
 from trade_ai.stock_metadata import (
     METADATA_FEATURE_COLUMNS,
@@ -77,11 +78,12 @@ def _merge_timeframe_features(
 
 
 def add_multi_timeframe_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add EMA and other indicator features, organized by calculation stage.
+    """Add EMA, session VWAP, and other indicator features.
 
     EMA distances: 1m, 3m, 5m, 15m, 30m, and 1h (spans 9, 21, 50).
     ATR, volatility, and RSI features are calculated on 1m, 3m, 5m, 15m, 30m,
-    and 1h.
+    and 1h. VWAP distance and five-bar rate of change use each timeframe's
+    candles and reset at the 09:15 Asia/Kolkata session open each day.
     ORB features use the first 15m, 30m, and 1h from the NSE session open.
     The completed-daily 10-session macro gate is calculated separately.
     """
@@ -158,6 +160,7 @@ def add_multi_timeframe_features(df: pd.DataFrame) -> pd.DataFrame:
             "RSI_14_Norm": calculate_rsi(bars["Close"], period=14),
             "RSI_21_Norm": calculate_rsi(bars["Close"], period=21),
         }
+        indicator_values.update(calculate_vwap(bars).to_dict(orient="series"))
         indicator_frame = pd.DataFrame(indicator_values)
         df = _merge_timeframe_features(df, indicator_frame, timeframe)
 
@@ -220,6 +223,19 @@ FEATURE_COLUMNS = [
     "Return_1m",
     "Return_5m",
     "Return_15m",
+    # Multi-timeframe session VWAP distance and five-bar slope
+    "VWAP_Dist",
+    "VWAP_ROC_5",
+    "VWAP_Dist_3m",
+    "VWAP_ROC_5_3m",
+    "VWAP_Dist_5m",
+    "VWAP_ROC_5_5m",
+    "VWAP_Dist_15m",
+    "VWAP_ROC_5_15m",
+    "VWAP_Dist_30m",
+    "VWAP_ROC_5_30m",
+    "VWAP_Dist_1h",
+    "VWAP_ROC_5_1h",
     # Multi-Timeframe EMA Distances
     ## 1m EMA Distances and 9/21 Spreads (5)
     "EMA_9_Dist",
