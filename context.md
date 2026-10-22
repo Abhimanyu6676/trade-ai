@@ -1,6 +1,6 @@
 # trade-ai Current Context
 
-Last reviewed: 2026-10-21.
+Last reviewed: 2026-10-22.
 
 ## Purpose and Architecture
 
@@ -18,22 +18,20 @@ A Python/`uv` project for market-data analysis and GRU-based directional forecas
 
 ## Data and Feature Contract
 
+- OHLCV input columns use lowercase names throughout: `timestamp`, `open`, `high`, `low`, `close`, and `volume`. The OpenAlgo client and CSV cache loader lowercase these known columns at ingestion; indicators and feature code consume the lowercase names.
 - Input data must be one-minute OHLCV candles timestamped at candle open. The UI exposes only `1m`, and `fetch_and_clean_candles` rejects other source intervals.
-- Resampled 3m, 5m, 15m, 30m, and 1h bars are timestamped at close. One-hour bars align to the 09:15 market-session open. Backward as-of joins use only completed bars; indicator warmup values must not be backfilled from future rows.
-- `add_multi_timeframe_features()` in `features.py` prepares resampled bars and calculates/aligns EMA, ATR, volatility, RSI, and VWAP across 1m, 3m, 5m, 15m, 30m, and 1h. Indicator values based on prices are represented as percentage-like ratios rather than raw price amounts where applicable.
-- The active feature pipeline does not call the available Liquidity, FVG, BAG, or MACD modules. The daily macro gate is calculated separately. Indicator formulas are in separate modules under `src/trade_ai/indicator/`.
-- Liquidity levels are confirmed swing highs/lows with two closed bars on the right. Sweep flags mean price wicked through a previously known level and closed back across it. Buy-side/sell-side level distances are signed ratios to close; no active level is encoded as zero.
-- `FEATURE_COLUMNS` in `features.py` is authoritative for model inputs. The current schema has 91 columns: base returns; session VWAP distance and five-bar VWAP rate of change on 1m, 3m, 5m, 15m, 30m, and 1h bars; EMA 9/21/50 distances and both 1m EMA 9/21 spread variants (EMA21- and Close-normalized); multi-timeframe 14-bar and 7-bar ATR, volatility, and 14-bar and 21-bar RSI; 15m, 30m, and 1h opening-range context; daily macro gate; and enum-generated stock metadata flags. VWAP uses typical price weighted by volume from the 09:15 Asia/Kolkata open, resets by local calendar date, and is normalized as a price-relative distance and slope. Liquidity, FVG, BAG, and MACD are not model inputs.
+- Resampled bars are timestamped at their right edge. Backward as-of joins use only completed bars; indicator warmup values must not be backfilled from future rows. `resample_ohlcv()` uses pandas' default interval boundaries unless an offset is explicitly provided.
+- `add_multi_timeframe_features()` in `features.py` calculates 14-period RSI, 14-period ATR, EMA distance for spans 9/21/50, a bullish FVG signal, and a liquidity-sweep signal for each default timeframe: 1m, 3m, 5m, 15m, 30m, and 1h.
+- The active model pipeline uses the simple FVG and liquidity-sweep signals. Extended FVG/liquidity features, BAG, VWAP, ORB, MACD, and the daily macro gate are not model inputs. Indicator formulas are in separate modules under `src/trade_ai/indicator/`.
+- `FEATURE_COLUMNS` in `features.py` is authoritative for model inputs. The current schema has 55 columns: three base returns; for each of 1m, 3m, 5m, 15m, 30m, and 1h, 14-period RSI, 14-period ATR, EMA 9/21/50 distances, the FVG signal, and the liquidity-sweep signal; and ten enum-generated stock metadata flags. The schema is built from `DEFAULT_TIMEFRAMES` and `DEFAULT_EMA_SPANS` so it stays aligned with `add_multi_timeframe_features()`. VWAP, ORB, macro trend, extended FVG, and extended liquidity features are not model inputs.
 - `stock_metadata.py` owns the `MarketCap` and `Sector` string enums, typed `StockMetadata` registry, unknown-ticker defaults, enum-generated feature names, and `encode_categorical_metadata()`. Adding an enum member automatically adds its one-hot column to feature output and `FEATURE_COLUMNS`. Unknown tickers default to mid-cap and `OTHER` sector.
 - Higher-timeframe EMA values are represented as scale-independent distances from the current close.
-- The macro gate uses completed daily closes, a 10-session SMA, its slope, and close-vs-SMA alignment. It is `1` for aligned bullish conditions, `-1` for aligned bearish conditions, and `0` otherwise. Inference only allows a forecast when its direction agrees with this gate.
-- ORB features use NSE's 09:15 Asia/Kolkata open and completed one-minute candles. Each opening window is fixed after 15, 30, or 60 minutes. Features include normalized range size, distances to range high/low/midpoint, and close-based breakout direction; values are exposed only after the range completes.
 - Forward-return labels are created only when `compute_normalized_features(..., include_targets=True)` is used for training. Inference leaves targets disabled so the newest rows with complete features remain available.
 
 ## Model and Training State
 
 - `StockPredictionBrain` builds its GRU input size from `len(FEATURE_COLUMNS)`.
-- Checkpoints store a feature-schema version and exact feature names. Untagged or mismatched checkpoints are rejected, even when tensor dimensions match. The current schema is incompatible with older 81-, 79-, 216-, 88-, 82-, 64-, 25-, 34-, 35-, 39-, 48-, 54-, 60-, 78-, 80-, 98-, 116-, 140-, 146-, 152-, 215-, and 232-input checkpoints. Retrain after feature formula changes even if the number of columns stays the same. Inference stays disabled until a compatible checkpoint is available.
+- Checkpoints store a feature-schema version and exact feature names. Untagged or mismatched checkpoints are rejected, even when tensor dimensions match. The current 55-input schema is incompatible with older checkpoints. Retrain after feature formula or schema changes, even if the number of columns stays the same. Inference stays disabled until a compatible checkpoint is available.
 - Checkpoints are saved to `.run_cache/gru_trading_model.pth` after successful epochs.
 - Prompt requests such as “reset your brain” or “start as new” are handled by `prediction_engine.reset_prediction_brain()`. Reset copies an existing checkpoint to a unique `.run_cache/gru_trading_model_backup_<timestamp>.pth`, removes the original, clears the loaded model object, and disables inference until retraining. If backup creation fails, the checkpoint is retained and the UI reports the error.
 - Prompt requests such as “start training” or “train the model” are routed to `train.start_model_training()`. Training orchestration and its background thread live in `train.py`; `prediction_engine.py` owns inference state and checkpoint loading. Duplicate starts are rejected while training runs in the app process. Inference is disabled during training; the completed checkpoint is loaded into the live app automatically. Training resumes only from a compatible schema-tagged checkpoint; use the reset command first for a fresh model. Progress and failures go to the app server console. Stopping/restarting the app also stops this in-process training run.
@@ -45,8 +43,8 @@ A Python/`uv` project for market-data analysis and GRU-based directional forecas
 ## OpenAlgo and Data Utilities
 
 - Route every OpenAlgo SDK call through the shared `openalgo` instance in `openalgo_client.py`. It lazily creates one SDK client from environment variables and exposes history and analyzer-status operations.
-- `openalgo.get_history()` standardizes DataFrame OHLCV results through `standardize_ohlcv_columns()` by default; pass `standardize=False` to retain the SDK response. Training and inference use this shared client.
-- `util.py` provides `load_cached_ohlcv(path, standardize=True)`, which loads an existing CSV or returns `None`, and `standardize_ohlcv_columns()` for lowercase/title-case OHLCV names and timestamps stored as either a dataframe index or column. Use `standardize=False` only when a caller needs the original CSV columns.
+- Training and inference use this shared client.
+- `util.py` provides `lowercase_ohlcv_columns(df)`, used at OpenAlgo and CSV cache boundaries to lowercase only the known timestamp/OHLCV column names while preserving other columns. `load_cached_ohlcv(path)` returns a cached DataFrame with this lowercase column contract.
 
 ## Environment and Run Commands
 

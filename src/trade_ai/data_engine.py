@@ -4,7 +4,7 @@ import pandas as pd
 
 from trade_ai.features import compute_normalized_features
 from trade_ai.openalgo_client import openalgo
-from trade_ai.prediction_engine import run_ai_prediction_inference
+from trade_ai.training_engine.prediction_engine import run_ai_prediction_inference
 
 
 def fetch_and_clean_candles(ticker: str, days_back: int, interval: str, exchange: str):
@@ -64,16 +64,16 @@ def fetch_and_clean_candles(ticker: str, days_back: int, interval: str, exchange
         display_layout = [
             col
             for col in [
-                "Timestamp",
-                "Open",
-                "High",
-                "Low",
-                "Close",
+                "timestamp",
+                "open",
+                "high",
+                "low",
+                "close",
                 "Return_1m",
                 "ATR_Pct_5m",
                 "Volatility_20_30m",
                 "Macro_Trend_Gate",
-                "Volume",
+                "volume",
             ]
             if col in processed_df.columns
         ]

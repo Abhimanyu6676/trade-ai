@@ -32,7 +32,7 @@ Would you like me to map out a step-by-step mechanical trading checklist combini
 
 ## Feature implementation in this project
 
-- A bullish FVG is a three-candle gap where `Low[t] > High[t-2]`; it is detected only when candle `t-1` swept a previously confirmed sell-side liquidity level. A bearish FVG uses `High[t] < Low[t-2]` after a buy-side sweep.
+- A bullish FVG is a three-candle gap where `low[t] > high[t-2]`; it is detected only when candle `t-1` swept a previously confirmed sell-side liquidity level. A bearish FVG uses `high[t] < low[t-2]` after a buy-side sweep.
 - Each detected gap records the third candle's body-to-14-bar-ATR ratio and whether its close breaks structure from before the sweep candle. A structure-qualified event requires at least a 1.0 ATR body and a close beyond the prior 20 bars' highs/lows. `FVG_Setup_Qualified` additionally requires formation during a London or New York killzone. The numeric thresholds are configurable in `detect_fvg_events`.
 - `FVG_In_Killzone` records whether the gap formed from 07:00-10:00 London or New York local time. Naive timestamps are interpreted as `Asia/Kolkata` by default; timezone-aware timestamps retain their timezone. Raw FVG events remain available outside those windows, but `FVG_Setup_Qualified` requires the event to be in a killzone.
 - Liquidity levels are confirmed swing highs/lows with two closed bars to the right. This keeps the sweep-to-FVG sequence causal and avoids using future bars.

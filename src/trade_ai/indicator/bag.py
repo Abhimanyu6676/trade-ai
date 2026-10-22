@@ -21,9 +21,9 @@ def calculate_bag(
     support; bearish zones use the lower edge as resistance. The BAG expires
     when a close breaks its far edge.
     """
-    high = bars["High"].to_numpy(dtype=float)
-    low = bars["Low"].to_numpy(dtype=float)
-    close = bars["Close"].to_numpy(dtype=float)
+    high = bars["high"].to_numpy(dtype=float)
+    low = bars["low"].to_numpy(dtype=float)
+    close = bars["close"].to_numpy(dtype=float)
     if liquidity_values is None:
         liquidity_values = calculate_liquidity(bars)
     if fvg_events is None:

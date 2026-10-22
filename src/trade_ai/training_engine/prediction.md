@@ -16,7 +16,7 @@ The merge_asof Alignment
 The higher-timeframe features are cleanly mapped onto your 1-minute rows across this entire timeline, ensuring zero lookahead bias.
 The Target Slice & Prediction
 Only after all the math is completely finished does your script slice the DataFrame to isolate your exact window: 9:15 AM to 11:00 AM.
-Your GRU model takes the final sequence ending at 11:00 AM, reads all 252 features (including the fully valid 1H EMA 50), and outputs its Triple Barrier probability score.
+Your GRU model takes the final sequence ending at 11:00 AM, reads all 55 features (including the fully valid 1H EMA 50), and outputs the probability of a positive five-minute return.
 Conceptual Code Blueprint
 If you look at your live/inference script, it typically looks something like this:
 
@@ -31,9 +31,9 @@ def run_live_prediction(target_date):
 
   # 3. NOW slice the DataFrame to your exact intraday window
   inference_slice = features_df[
-      (features_df["Timestamp"].dt.date == target_date)
-      & (features_df["Timestamp"].dt.time >= datetime.time(9, 15))
-      & (features_df["Timestamp"].dt.time <= datetime.time(11, 00))
+      (features_df["timestamp"].dt.date == target_date)
+      & (features_df["timestamp"].dt.time >= datetime.time(9, 15))
+      & (features_df["timestamp"].dt.time <= datetime.time(11, 00))
   ]
 
   # 4. Feed into the GRU model safely!

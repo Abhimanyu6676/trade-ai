@@ -24,7 +24,7 @@ Apply the recursive multiplier formula to the latest period:
 
 Keep EMA in relative form instead of prices, so modal can train on different stock prices
 
-- By expressing your EMAs as relative percentage distances—like (df["Close"] - ema_values) / ema_values—you solves one of the biggest hurdles in multi-stock machine learning.   
+- By expressing your EMAs as relative percentage distances—like (df["close"] - ema_values) / ema_values—you solve one of the biggest hurdles in multi-stock machine learning.   
 
 - Here is why that approach works so well for our pipeline:
   - Price Scale Independence: A stock trading at ₹600 (like SBIN) and a stock trading at ₹2,500 (like Reliance) will generate vastly different absolute price values. By converting them to relative distances, a 1% pull-back from the 50 EMA looks identical to the neural network whether the stock is priced at ₹50 or ₹5,000.
@@ -43,7 +43,7 @@ Large systematic funds rarely use EMAs to trigger trades directly; instead, they
 2. Dynamic Algorithmic Execution Loops
 
 Institutions managing massive position sizes cannot enter the market all at once without causing adverse market impact.
-  - Mean Reversion Inefficient Pricing: Algorithms like VWAP (Volume-Weighted Average Price) are frequently optimized using short-to-medium EMAs (like the 21-day or 50-day EMA).
+  - Mean Reversion Inefficient Pricing: Algorithms like VWAP (volume-Weighted Average Price) are frequently optimized using short-to-medium EMAs (like the 21-day or 50-day EMA).
   - Execution bots look for overextended asset prices away from the EMA line to accumulate or distribute shares gradually inside institutional "buy zones"—treating the moving average as a dynamic anchor of fair value.
 
 3. Defining Mathematical Volatility Trailing Stops

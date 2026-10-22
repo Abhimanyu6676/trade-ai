@@ -25,7 +25,7 @@ Range = ORH - ORL
 
 ## Important Notes when applying ORB indicator
 
-Given how your pipeline is built—using percentage distances for your EMAs ((Close - EMA) / EMA), percentage-based ATR, and volatility—introducing absolute price levels for an Open Range Breakout (ORB) would break your multi-stock training architecture.   
+Given how your pipeline is built—using percentage distances for your EMAs ((close - EMA) / EMA), percentage-based ATR, and volatility—introducing absolute price levels for an Open Range Breakout (ORB) would break your multi-stock training architecture.   
 
 Here is why relative ORB is essential for your setup, along with how you should structure it:
 
@@ -72,10 +72,10 @@ For each window, the pipeline returns these five features:
 | Feature suffix | Calculation | Meaning |
 | --- | --- | --- |
 | `Range_Pct` | `(ORH - ORL) / ORM` | Opening range width relative to its midpoint. |
-| `High_Distance_Pct` | `(ORH - Close) / Close` | Positive below ORH; negative above ORH. |
-| `Low_Distance_Pct` | `(ORL - Close) / Close` | Positive above ORL; negative below ORL. |
-| `Midpoint_Distance_Pct` | `(Close - ORM) / Close` | Positive above ORM; negative below ORM. |
-| `Breakout_Direction` | `1` if `Close > ORH`; `-1` if `Close < ORL`; otherwise `0` | Close-based breakout state; a wick alone does not count. |
+| `High_Distance_Pct` | `(ORH - close) / close` | Positive below ORH; negative above ORH. |
+| `Low_Distance_Pct` | `(ORL - close) / close` | Positive above ORL; negative below ORL. |
+| `Midpoint_Distance_Pct` | `(close - ORM) / close` | Positive above ORM; negative below ORM. |
+| `Breakout_Direction` | `1` if `close > ORH`; `-1` if `close < ORL`; otherwise `0` | Close-based breakout state; a wick alone does not count. |
 
 For example, `ORB_15m_High_Distance_Pct` is the 15-minute opening-range high distance. `_Pct` values are ratios stored as decimals, not values multiplied by 100; `0.01` represents 1%. The model does not currently use the readiness flag, absolute ORH/ORL values, or the T1/T2 target projections described above. There is no 5-minute ORB feature in the active model schema.
 

@@ -3,14 +3,20 @@
 import pandas as pd
 
 
-def calculate_atr_pct(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    """Calculate ATR as a fraction of close for OHLC candles."""
-    high_low = df["High"] - df["Low"]
-    high_prev_close = (df["High"] - df["Close"].shift(1)).abs()
-    low_prev_close = (df["Low"] - df["Close"].shift(1)).abs()
+def calculate_atr(
+    df: pd.DataFrame, period: int = 14, relative: bool = True
+) -> pd.Series:
+    """Computes ATR.
 
-    true_range = pd.concat(
-        [high_low, high_prev_close, low_prev_close], axis=1
-    ).max(axis=1)
+    If relative=True, returns percentage of close price.
+    """
+    high_low = df["high"] - df["low"]
+    high_close = (df["high"] - df["close"].shift()).abs()
+    low_close = (df["low"] - df["close"].shift()).abs()
+
+    true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     atr = true_range.rolling(window=period).mean()
-    return atr / df["Close"]
+
+    if relative:
+        return atr / df["close"]
+    return atr

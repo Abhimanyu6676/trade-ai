@@ -4,50 +4,85 @@ from pathlib import Path
 
 import pandas as pd
 
-_OHLCV_COLUMN_NAMES = {
-    "timestamp": "Timestamp",
-    "open": "Open",
-    "high": "High",
-    "low": "Low",
-    "close": "Close",
-    "volume": "Volume",
-}
+_OHLCV_COLUMNS = {"timestamp", "open", "high", "low", "close", "volume"}
 
 
-def standardize_ohlcv_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize OHLCV column names and sort rows by timestamp.
-
-    If the timestamp is stored in the index rather than a column, move it into
-    a column before applying the canonical names used by feature processing.
-    """
-    result = df.copy()
-    has_timestamp_column = any(
-        str(column).casefold() == "timestamp" for column in result.columns
-    )
-    if not has_timestamp_column:
-        result = result.reset_index()
-
-    renamed_columns = {
-        column: _OHLCV_COLUMN_NAMES.get(str(column).casefold(), str(column))
-        for column in result.columns
+def lowercase_ohlcv_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Rename timestamp and OHLCV columns to lowercase; leave other columns intact."""
+    column_map = {
+        column: str(column).casefold()
+        for column in df.columns
+        if str(column).casefold() in _OHLCV_COLUMNS
     }
-    result = result.rename(columns=renamed_columns)
-    if "Timestamp" in result.columns:
-        result = result.sort_values(by="Timestamp")
-    return result.reset_index(drop=True)
+    return df.rename(columns=column_map)
 
 
-def load_cached_ohlcv(
-    csv_path: str | Path, standardize: bool = True
-) -> pd.DataFrame | None:
-    """Load an OHLCV CSV cache, standardizing its columns by default.
-
-    Return ``None`` when the cache file does not exist. Set ``standardize`` to
-    ``False`` to return the CSV data with its original column names and order.
-    """
+def load_cached_ohlcv(csv_path: str | Path) -> pd.DataFrame | None:
+    """Load an OHLCV CSV cache with lowercase timestamp and OHLCV columns."""
     cache_path = Path(csv_path)
     if not cache_path.is_file():
         return None
 
     df = pd.read_csv(cache_path)
-    return standardize_ohlcv_columns(df) if standardize else df
+    return lowercase_ohlcv_columns(df)
+
+
+def resample_ohlcv(
+    df: pd.DataFrame, rule: str, offset: str | None = None
+) -> pd.DataFrame:
+    """Aggregate candle-open OHLCV rows into completed bars labeled at close."""
+
+    df_temp = df.copy()
+    if not pd.api.types.is_datetime64_any_dtype(df_temp["timestamp"]):
+        df_temp["timestamp"] = pd.to_datetime(df_temp["timestamp"])
+    if not df_temp["timestamp"].is_monotonic_increasing:
+        df_temp = df_temp.sort_values("timestamp")
+    df_temp = df_temp.set_index("timestamp")
+
+    if offset is not None:
+        return pd.DataFrame(
+            {
+                "open": df_temp["open"]
+                .resample(rule, label="right", closed="left", offset=offset)
+                .first(),
+                "high": df_temp["high"]
+                .resample(rule, label="right", closed="left", offset=offset)
+                .max(),
+                "low": df_temp["low"]
+                .resample(rule, label="right", closed="left", offset=offset)
+                .min(),
+                "close": df_temp["close"]
+                .resample(rule, label="right", closed="left", offset=offset)
+                .last(),
+                "volume": df_temp["volume"]
+                .resample(rule, label="right", closed="left", offset=offset)
+                .sum(),
+            }
+        ).dropna().reset_index()
+
+    return pd.DataFrame(
+        {
+            "open": df_temp["open"]
+            .resample(rule, label="right", closed="left")
+            .first(),
+            "high": df_temp["high"].resample(rule, label="right", closed="left").max(),
+            "low": df_temp["low"].resample(rule, label="right", closed="left").min(),
+            "close": df_temp["close"]
+            .resample(rule, label="right", closed="left")
+            .last(),
+            "volume": df_temp["volume"]
+            .resample(rule, label="right", closed="left")
+            .sum(),
+        }
+    ).dropna().reset_index()
+
+
+def resample_close(series: pd.Series, rule: str, offset: str | None = None):
+    """Return completed-bar closes, optionally aligned to a session offset."""
+    if offset is None:
+        return series.resample(rule, label="right", closed="left").last().dropna()
+    return (
+        series.resample(rule, label="right", closed="left", offset=offset)
+        .last()
+        .dropna()
+    )

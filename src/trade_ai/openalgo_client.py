@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 from openalgo import api
 
-from trade_ai.util import standardize_ohlcv_columns
+from trade_ai.util import lowercase_ohlcv_columns
 
 DEFAULT_OPENALGO_HOST = "https://openalgo-1.sternetsmart.com"
 
@@ -39,9 +39,8 @@ class OpenAlgo:
         start_date: str,
         end_date: str,
         source: str = "api",
-        standardize: bool = True,
     ) -> Any:
-        """Fetch history, standardizing DataFrame OHLCV columns by default."""
+        """Fetch history with lowercase timestamp and OHLCV DataFrame columns."""
         history = self.initiate().history(
             symbol=symbol,
             exchange=exchange,
@@ -50,8 +49,9 @@ class OpenAlgo:
             end_date=end_date,
             source=source,
         )
-        if standardize and isinstance(history, pd.DataFrame):
-            return standardize_ohlcv_columns(history)
+
+        if isinstance(history, pd.DataFrame):
+            return lowercase_ohlcv_columns(history)
         return history
 
     def get_analyzer_status(self) -> Any:

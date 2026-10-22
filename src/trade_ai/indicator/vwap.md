@@ -1,6 +1,6 @@
 # VWAP indicator
 
-The Volume Weighted Average Price (VWAP) is an intraday technical indicator that shows the average price a security has traded at throughout the session, weighted by volume. Unlike simple moving averages, it reveals where the most money has actually changed hands, serving as a benchmark for fair value that resets at the start of each trading day.
+The volume Weighted Average Price (VWAP) is an intraday technical indicator that shows the average price a security has traded at throughout the session, weighted by volume. Unlike simple moving averages, it reveals where the most money has actually changed hands, serving as a benchmark for fair value that resets at the start of each trading day.
 
 ## What is VWAP?
 
@@ -18,12 +18,12 @@ VWAP measures true intraday average price. It combines price and volume into a s
 ## How it is Calculated
 
 VWAP divides the cumulative sum of price multiplied by volume by the cumulative volume for the session:
-    ```VWAP = (Typical Price * Volume) / Volume```
+    ```VWAP = (Typical Price * volume) / volume```
 
-1. Calculate Typical Price: For each period (e.g., 1-minute or 5-minute candle), find the average of the High, Low, and Close:
-    ```Typical Price = (High + Low + Close) / 3```
-1. Multiply by Volume: Multiply the Typical Price by that period's volume: 
-    ```(Typical Price × Volume).```
+1. Calculate Typical Price: For each period (e.g., 1-minute or 5-minute candle), find the average of `high`, `low`, and `close`:
+    ```Typical Price = (high + low + close) / 3```
+1. Multiply by volume: Multiply the Typical Price by that period's volume: 
+    ```(Typical Price × volume).```
 2. Accumulate: Add these values up continuously from the market open.
 3. Divide: Divide that running total by the total cumulative volume traded since the open.
 

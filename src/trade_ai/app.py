@@ -4,7 +4,6 @@ import gradio as ui
 
 from trade_ai.ai_parser import extract_market_intent
 from trade_ai.data_engine import fetch_and_clean_candles, get_openalgo_status_message
-from trade_ai.prediction_engine import reset_prediction_brain
 from trade_ai.server.server import start_server
 
 
@@ -17,13 +16,14 @@ def controller_pipeline(user_query: str, interval: str, exchange: str):
     action, ticker, days_back = extract_market_intent(user_query)
 
     if action == "reset_brain":
-        reset_message = reset_prediction_brain()
-        return reset_message, "MODEL", exchange, "BRAIN RESET", "0.0%", None
+        # TODO
+        # reset_message = reset_prediction_brain()
+        return "reset_message", "MODEL", exchange, "BRAIN RESET", "0.0%", None
 
     if action == "start_training":
-        from trade_ai.train import start_model_training
+        from trade_ai.training_engine.train_master import start_master_training
 
-        training_message = start_model_training()
+        training_message = start_master_training()
         return training_message, "MODEL", exchange, "TRAINING", "0.0%", None
 
     # Handle OpenAlgo Analyzer Status Intent Request

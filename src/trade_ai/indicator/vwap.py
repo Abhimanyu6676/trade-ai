@@ -15,8 +15,8 @@ def calculate_vwap(
 ) -> pd.DataFrame:
     """Return price-relative VWAP distance and its session-local rate of change.
 
-    ``bars`` must be indexed by candle-open timestamp and contain High, Low,
-    Close, and Volume columns. VWAP resets for each local calendar date. The
+    ``bars`` must be indexed by candle-open timestamp and contain high, low,
+    close, and volume columns. VWAP resets for each local calendar date. The
     rate of change compares VWAP with its value ``roc_period`` candles earlier
     in the same session.
     """
@@ -29,8 +29,8 @@ def calculate_vwap(
     else:
         local_timestamps = timestamps.tz_convert(source_timezone)
 
-    typical_price = (bars["High"] + bars["Low"] + bars["Close"]) / 3.0
-    volume = pd.to_numeric(bars["Volume"], errors="coerce").clip(lower=0)
+    typical_price = (bars["high"] + bars["low"] + bars["close"]) / 3.0
+    volume = pd.to_numeric(bars["volume"], errors="coerce").clip(lower=0)
     market_open = time.fromisoformat(session_open)
     during_session = np.asarray(
         [timestamp.time() >= market_open for timestamp in local_timestamps],
@@ -45,7 +45,7 @@ def calculate_vwap(
     vwap = cumulative_value.div(cumulative_volume.where(cumulative_volume > 0))
     vwap_previous = vwap.groupby(session_dates, sort=False).shift(roc_period)
 
-    close = pd.to_numeric(bars["Close"], errors="coerce")
+    close = pd.to_numeric(bars["close"], errors="coerce")
     output = pd.DataFrame(index=bars.index)
     output["VWAP_Dist"] = close.div(vwap).sub(1.0)
     output["VWAP_ROC_5"] = vwap.div(vwap_previous).sub(1.0)

@@ -3,8 +3,7 @@
 import numpy as np
 import pandas as pd
 
-from trade_ai.indicator.liquidity import calculate_liquidity
-
+from trade_ai.indicator.liquidity import calculate_liquidity_extended
 
 LONDON_KILLZONE = (7, 10)
 NEW_YORK_KILLZONE = (7, 10)
@@ -27,11 +26,10 @@ def _killzone_mask(index: pd.Index, source_timezone: str) -> np.ndarray:
         new_york_minutes = new_york.hour * 60 + new_york.minute
         london_start, london_end = (hour * 60 for hour in LONDON_KILLZONE)
         ny_start, ny_end = (hour * 60 for hour in NEW_YORK_KILLZONE)
-        return (
-            ((london_minutes >= london_start) & (london_minutes < london_end))
-            | ((new_york_minutes >= ny_start) & (new_york_minutes < ny_end))
+        return ((london_minutes >= london_start) & (london_minutes < london_end)) | (
+            (new_york_minutes >= ny_start) & (new_york_minutes < ny_end)
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return np.zeros(len(index), dtype=bool)
 
 
@@ -51,10 +49,10 @@ def detect_fvg_events(
     killzone flag is recorded separately because some instruments do not trade
     during London/New York killzones.
     """
-    open_ = bars["Open"].to_numpy(dtype=float)
-    high = bars["High"].to_numpy(dtype=float)
-    low = bars["Low"].to_numpy(dtype=float)
-    close = bars["Close"].to_numpy(dtype=float)
+    open_ = bars["open"].to_numpy(dtype=float)
+    high = bars["high"].to_numpy(dtype=float)
+    low = bars["low"].to_numpy(dtype=float)
+    close = bars["close"].to_numpy(dtype=float)
     if liquidity_values is None:
         liquidity_values = calculate_liquidity(bars)
     if len(bars) == 0:
@@ -73,18 +71,24 @@ def detect_fvg_events(
     ssl_sweep = liquidity_values["SSL_Sweep"].to_numpy(dtype=bool)
     bsl_sweep = liquidity_values["BSL_Sweep"].to_numpy(dtype=bool)
 
-    prior_high = bars["High"].shift(2).rolling(
-        structure_lookback, min_periods=structure_lookback
-    ).max().to_numpy(dtype=float)
-    prior_low = bars["Low"].shift(2).rolling(
-        structure_lookback, min_periods=structure_lookback
-    ).min().to_numpy(dtype=float)
-    previous_close = bars["Close"].shift(1).to_numpy(dtype=float)
+    prior_high = (
+        bars["high"]
+        .shift(2)
+        .rolling(structure_lookback, min_periods=structure_lookback)
+        .max()
+        .to_numpy(dtype=float)
+    )
+    prior_low = (
+        bars["low"]
+        .shift(2)
+        .rolling(structure_lookback, min_periods=structure_lookback)
+        .min()
+        .to_numpy(dtype=float)
+    )
+    previous_close = bars["close"].shift(1).to_numpy(dtype=float)
     true_range = np.maximum(
         high - low,
-        np.maximum(
-            np.abs(high - previous_close), np.abs(low - previous_close)
-        ),
+        np.maximum(np.abs(high - previous_close), np.abs(low - previous_close)),
     )
     true_range[0] = high[0] - low[0]
     atr = (
@@ -143,7 +147,7 @@ def detect_fvg_events(
     )
 
 
-def calculate_fvg(
+def calculate_fvg_extended(
     bars: pd.DataFrame,
     liquidity_values: pd.DataFrame | None = None,
     fvg_events: pd.DataFrame | None = None,
@@ -158,11 +162,11 @@ def calculate_fvg(
     fraction of the zone. Stop distance uses candle 1's extreme, and target
     distance uses the nearest remaining liquidity level in the trade direction.
     """
-    low = bars["Low"].to_numpy(dtype=float)
-    high = bars["High"].to_numpy(dtype=float)
-    close = bars["Close"].to_numpy(dtype=float)
+    low = bars["low"].to_numpy(dtype=float)
+    high = bars["high"].to_numpy(dtype=float)
+    close = bars["close"].to_numpy(dtype=float)
     if liquidity_values is None:
-        liquidity_values = calculate_liquidity(bars)
+        liquidity_values = calculate_liquidity_extended(bars)
     if fvg_events is None:
         fvg_events = detect_fvg_events(
             bars, liquidity_values=liquidity_values, source_timezone=source_timezone
@@ -288,3 +292,11 @@ def calculate_fvg(
         },
         index=bars.index,
     )
+
+
+def calculate_fvg(df: pd.DataFrame) -> pd.Series:
+    """Detects Bullish Fair Value Gaps (FVG)."""
+    fvg = pd.Series(0, index=df.index)
+    fvg_condition = df["high"].shift(2) < df["low"]
+    fvg.loc[fvg_condition] = 1
+    return fvg

@@ -43,9 +43,9 @@ def calculate_orb(
         return pd.DataFrame(output, index=bars.index)
 
     open_time = time.fromisoformat(session_open)
-    high = bars["High"].to_numpy(dtype=float)
-    low = bars["Low"].to_numpy(dtype=float)
-    close = bars["Close"].to_numpy(dtype=float)
+    high = bars["high"].to_numpy(dtype=float)
+    low = bars["low"].to_numpy(dtype=float)
+    close = bars["close"].to_numpy(dtype=float)
 
     session_positions: dict[date, list[int]] = {}
     for index, session_date in enumerate(local_timestamps.date):
@@ -54,7 +54,7 @@ def calculate_orb(
     for session_date, positions_list in session_positions.items():
         positions = np.asarray(positions_list, dtype=int)
         session_timestamps = local_timestamps[positions]
-        session_start = pd.Timestamp.combine(session_date, open_time).tz_localize(
+        session_start = pd.timestamp.combine(session_date, open_time).tz_localize(
             source_timezone
         )
         range_end = session_start + pd.Timedelta(minutes=opening_minutes)

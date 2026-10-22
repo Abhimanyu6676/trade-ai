@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 
-def calculate_liquidity(
+def calculate_liquidity_extended(
     bars: pd.DataFrame, pivot_bars: int = 2
 ) -> pd.DataFrame:
     """Calculate nearest unswept liquidity and sweep events for each bar.
@@ -15,9 +15,9 @@ def calculate_liquidity(
     level followed by a close back across it. Distances are signed ratios to
     close: buy-side levels are above close and sell-side levels below it.
     """
-    high = bars["High"].to_numpy(dtype=float)
-    low = bars["Low"].to_numpy(dtype=float)
-    close = bars["Close"].to_numpy(dtype=float)
+    high = bars["high"].to_numpy(dtype=float)
+    low = bars["low"].to_numpy(dtype=float)
+    close = bars["close"].to_numpy(dtype=float)
     length = len(bars)
 
     bsl_distance_pct = np.zeros(length, dtype=float)
@@ -86,3 +86,12 @@ def calculate_liquidity(
         },
         index=bars.index,
     )
+
+
+def calculate_liquidity_sweep(df: pd.DataFrame, window: int = 20) -> pd.Series:
+    """Detects Liquidity Sweeps."""
+    recent_low = df["low"].shift(1).rolling(window=window).min()
+    sweep = pd.Series(0, index=df.index)
+    sweep_condition = (df["low"] < recent_low) & (df["close"] > recent_low)
+    sweep.loc[sweep_condition] = 1
+    return sweep
