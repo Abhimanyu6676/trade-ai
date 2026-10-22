@@ -13,6 +13,11 @@ from trade_ai.stock_metadata import STOCK_METADATA
 
 from .features import compute_normalized_features
 from .labels import apply_triple_barrier
+from .sequence_loader import (
+    DEFAULT_SEQUENCE_LENGTH,
+    session_dates,
+    valid_window_starts,
+)
 
 # Directory and path configurations
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -65,19 +70,28 @@ class SlidingWindowDataset(Dataset):
         self,
         features_np: np.ndarray,
         targets_np: np.ndarray,
-        sequence_length: int = 30,
+        session_dates_np: np.ndarray,
+        sequence_length: int = DEFAULT_SEQUENCE_LENGTH,
     ):
         self.features = torch.tensor(features_np, dtype=torch.float32)
-        self.targets = torch.tensor(targets_np, dtype=torch.long)
+        self.targets = torch.tensor(targets_np, dtype=torch.float32)
         self.seq_len = sequence_length
+        if len(session_dates_np) != len(self.features):
+            raise ValueError("session dates must align with feature rows")
+        window_starts = valid_window_starts(session_dates_np, sequence_length)
+        target_indices = window_starts + sequence_length - 1
+        labeled_windows = np.isfinite(targets_np[target_indices])
+        self.window_starts = window_starts[labeled_windows]
 
     def __len__(self) -> int:
-        return max(0, len(self.features) - self.seq_len + 1)
+        return len(self.window_starts)
 
     def __getitem__(self, idx: int):
-        target_idx = idx + self.seq_len - 1
-        x_seq = self.features[idx : target_idx + 1]
-        y_val = self.targets[target_idx]
+        start_idx = int(self.window_starts[idx])
+        target_idx = start_idx + self.seq_len - 1
+        x_seq = self.features[start_idx : target_idx + 1]
+        # Convert Triple Barrier classes {-1, 0, 1} to CrossEntropy classes {0, 1, 2}.
+        y_val = self.targets[target_idx].to(torch.long) + 1
         return x_seq, y_val
 
 
@@ -169,7 +183,7 @@ def load_or_fetch_stock_data(ticker: str) -> pd.DataFrame | None:
 # --- 4. Main GRU Training Pipeline ---
 def train_gru_model(
     epochs: int = 10,
-    sequence_length: int = 30,
+    sequence_length: int = DEFAULT_SEQUENCE_LENGTH,
     batch_size: int = 256,
     learning_rate: float = 0.001,
 ):
@@ -213,21 +227,17 @@ def train_gru_model(
                 end_minute=30,
             )
 
-            # Drop warm-up and time-filter NaNs
-            df_clean = df_feat.dropna(subset=["target"]).copy()
-            if len(df_clean) <= sequence_length:
-                logger.warning(
-                    "Skipping %s: Insufficient valid rows after filtering.", ticker
-                )
-                continue
-
+            # Keep feature rows with NaN targets as sequence context (for example,
+            # 09:30-09:59 candles can inform the first labeled 10:00 sample).
+            df_clean = df_feat.dropna(subset=["timestamp"]).copy()
             feature_cols = [
                 col for col in df_clean.columns if col not in ["timestamp", "target"]
             ]
             X_np = df_clean[feature_cols].to_numpy(dtype=np.float32)
-
-            # Remap target classes: {-1, 0, 1} -> {0, 1, 2} for CrossEntropyLoss
-            y_np = (df_clean["target"].astype(int) + 1).to_numpy(dtype=np.int64)
+            y_np = pd.to_numeric(df_clean["target"], errors="coerce").to_numpy(
+                dtype=np.float32
+            )
+            session_dates_np = session_dates(df_clean["timestamp"])
 
             # Lazy-initialize model architecture once input dimension is known
             if model is None:
@@ -245,7 +255,17 @@ def train_gru_model(
             assert optimizer is not None
 
             # Build batched dataset and dataloader
-            dataset = SlidingWindowDataset(X_np, y_np, sequence_length=sequence_length)
+            dataset = SlidingWindowDataset(
+                X_np,
+                y_np,
+                session_dates_np=session_dates_np,
+                sequence_length=sequence_length,
+            )
+            if len(dataset) == 0:
+                logger.warning(
+                    "Skipping %s: No complete same-session sequences available.", ticker
+                )
+                continue
             dataloader = DataLoader(
                 dataset, batch_size=batch_size, shuffle=True, drop_last=True
             )

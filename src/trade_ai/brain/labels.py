@@ -23,10 +23,14 @@ def apply_triple_barrier(
     start_minute: int = 0,
     end_hour: int = 14,
     end_minute: int = 30,
+    market_close_hour: int = 15,
+    market_close_minute: int = 15,
 ) -> pd.Series:
     """Generates Triple Barrier Method labels (1: Win, -1: Loss, 0: Timeout)
 
-    restricted strictly between start time and end time, with comprehensive logging.
+    Entries are restricted to the configured window. Each forward barrier search
+    stops at the earlier of the holding limit or that trading session's close.
+    Candle timestamps are assumed to be candle-open timestamps.
     """
     df = df.copy()
     logger.info(
@@ -45,11 +49,14 @@ def apply_triple_barrier(
 
     # Parse timestamps to extract time of day
     timestamps = pd.to_datetime(df[timestamp_col])
+    if not timestamps.is_monotonic_increasing:
+        raise ValueError("df must be sorted chronologically by timestamp")
     times = timestamps.dt.time
 
     # Define trading window boundaries using standard library 'time'
     trade_start = time(start_hour, start_minute)
     trade_end = time(end_hour, end_minute)
+    market_close = time(market_close_hour, market_close_minute)
 
     n = len(df)
     labels = np.full(n, np.nan)
@@ -58,7 +65,10 @@ def apply_triple_barrier(
     skipped_nan = 0
     valid_labels = 0
 
-    for i in range(n - max_holding_period):
+    if max_holding_period < 1:
+        raise ValueError("max_holding_period must be at least 1")
+
+    for i in range(n):
         # 1. Enforce time-of-day filter
         current_time = times.iloc[i]
         if not (trade_start <= current_time <= trade_end):
@@ -77,9 +87,21 @@ def apply_triple_barrier(
         upper_barrier = entry_price + (atr * tp_multiplier)
         lower_barrier = entry_price - (atr * sl_multiplier)
 
-        # Look forward up to the max holding period
-        end_idx = min(i + max_holding_period, n)
-        future_window = closes[i + 1 : end_idx]
+        # Bound the vertical barrier by both the holding period and this session.
+        # The first candle at/after market close is not a valid intraday outcome.
+        entry_date = timestamps.iloc[i].date()
+        future_end = i + 1
+        max_future_idx = min(i + max_holding_period, n - 1)
+        while future_end <= max_future_idx:
+            future_timestamp = timestamps.iloc[future_end]
+            if (
+                future_timestamp.date() != entry_date
+                or future_timestamp.time() >= market_close
+            ):
+                break
+            future_end += 1
+
+        future_window = closes[i + 1 : future_end]
 
         # Find first touch
         touched_tp = np.where(future_window >= upper_barrier)[0]
@@ -103,8 +125,8 @@ def apply_triple_barrier(
 
     logger.info("Triple Barrier generation complete.")
     logger.info(
-        " - Valid labels generated: %d (Wins [1]: %get, Losses [-1]: %get,"
-        " Timeouts [0]: %get)",
+        " - Valid labels generated: %d (Wins [1]: %d, Losses [-1]: %d,"
+        " Timeouts [0]: %d)",
         valid_labels,
         label_counts.get(1, 0),
         label_counts.get(-1, 0),

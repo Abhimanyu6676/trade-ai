@@ -6,7 +6,10 @@ import numpy as np
 import pandas as pd
 import torch
 
+from trade_ai.util import merge_ohlcv_history
+
 from .features import compute_normalized_features
+from .sequence_loader import DEFAULT_SEQUENCE_LENGTH, latest_session_sequence
 from .train_gru import GRUTradingBrain
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -66,7 +69,10 @@ class EnsemblePredictionEngine:
         logger.info("🧹 Unloaded prediction engines from memory.")
 
     def predict(
-        self, raw_df: pd.DataFrame, ticker: str, sequence_length: int = 30
+        self,
+        raw_df: pd.DataFrame,
+        ticker: str,
+        sequence_length: int = DEFAULT_SEQUENCE_LENGTH,
     ) -> tuple[int, float, dict]:
         """Generates an ensemble prediction for the latest candle.
 
@@ -78,6 +84,11 @@ class EnsemblePredictionEngine:
         if self.lgb_model is None and self.gru_model is None:
             logger.warning("⚠️ No trained models loaded in prediction engine.")
             return 0, 0.0, {"error": "Models not loaded"}
+
+        # Callers may pass historical rows followed by a live/latest batch.
+        # Stable timestamp sorting moves that batch to the end; for duplicate
+        # timestamps its later row takes precedence.
+        raw_df = merge_ohlcv_history(raw_df)
 
         # 1. Separate Feature Engineering & Metadata Encoding
         df_lgb_feat = compute_normalized_features(raw_df, ticker, model_type="lgb")
@@ -93,17 +104,18 @@ class EnsemblePredictionEngine:
             col for col in df_gru_feat.columns if col not in exclude_cols
         ]
 
-        if len(df_lgb_feat) < sequence_length:
-            return 0, 0.0, {"error": "Insufficient rows for sequence length"}
+        if df_lgb_feat.empty:
+            return 0, 0.0, {"error": "Insufficient data after feature warmup"}
 
         # Extract latest snapshot for LightGBM
         latest_snapshot = df_lgb_feat[lgb_feature_cols].iloc[[-1]]
 
-        # Extract rolling window sequence for GRU
-        sequence_features = (
-            df_gru_feat[gru_feature_cols]
-            .iloc[-sequence_length:]
-            .to_numpy(dtype=np.float32)
+        # The GRU context is restricted to the newest trading session. Historical
+        # sessions warm up indicators, but never become recurrent sequence steps.
+        sequence_features = latest_session_sequence(
+            df_gru_feat,
+            gru_feature_cols,
+            sequence_length=sequence_length,
         )
 
         lgb_probs = None
@@ -136,7 +148,7 @@ class EnsemblePredictionEngine:
             except Exception as e:
                 logger.error("Failed to initialize GRU brain for inference: %s", e)
 
-        if self.gru_model is not None:
+        if self.gru_model is not None and sequence_features is not None:
             self.gru_model.eval()
             with torch.no_grad():
                 x_tensor = (
@@ -148,6 +160,11 @@ class EnsemblePredictionEngine:
                 # Apply Softmax to convert raw logits to probabilities
                 probs = torch.softmax(logits, dim=1)
                 gru_probs = probs.cpu().numpy()[0]
+        elif self.gru_model is not None:
+            logger.warning(
+                "Newest session has fewer than %d valid rows for GRU inference.",
+                sequence_length,
+            )
 
         # --- Ensemble Blending (50% LightGBM + 50% GRU) ---
         if lgb_probs is not None and gru_probs is not None:
@@ -157,7 +174,13 @@ class EnsemblePredictionEngine:
         elif gru_probs is not None:
             final_probs = gru_probs
         else:
-            return 0, 0.0, {"error": "Inference computation failed"}
+            return (
+                0,
+                0.0,
+                {
+                    "error": "No inference result; newest session lacks a complete GRU sequence"
+                },
+            )
 
         # Map class index back to Triple Barrier target space:
         # Index 0 -> Class 0 (-1: Stop-Loss)
@@ -189,7 +212,9 @@ def get_prediction_engine() -> EnsemblePredictionEngine:
 
 
 def run_ai_prediction_inference(
-    raw_df: pd.DataFrame, ticker: str, sequence_length: int = 30
+    raw_df: pd.DataFrame,
+    ticker: str,
+    sequence_length: int = DEFAULT_SEQUENCE_LENGTH,
 ) -> tuple[int, float]:
     """Wrapper function matching data engine calls."""
     engine = get_prediction_engine()

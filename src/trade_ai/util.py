@@ -17,6 +17,38 @@ def lowercase_ohlcv_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df.rename(columns=column_map)
 
 
+def merge_ohlcv_history(
+    history_df: pd.DataFrame,
+    latest_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Merge historical candles followed by newer candles in timestamp order.
+
+    If both inputs contain the same timestamp, the later input wins. With one
+    input, existing row order breaks timestamp ties, so appended/live rows win.
+    """
+    frames = [
+        frame
+        for frame in (history_df, latest_df)
+        if frame is not None and not frame.empty
+    ]
+    if not frames:
+        return pd.DataFrame(columns=history_df.columns)
+
+    combined = lowercase_ohlcv_columns(pd.concat(frames, ignore_index=True))
+    if "timestamp" not in combined.columns:
+        raise ValueError("OHLCV data must include a timestamp column")
+
+    timestamps = pd.to_datetime(combined["timestamp"], errors="coerce")
+    if timestamps.isna().any():
+        raise ValueError("OHLCV data contains invalid timestamps")
+    combined["timestamp"] = timestamps
+    return (
+        combined.sort_values("timestamp", kind="mergesort")
+        .drop_duplicates(subset="timestamp", keep="last")
+        .reset_index(drop=True)
+    )
+
+
 def load_cached_ohlcv(csv_path: str | Path) -> pd.DataFrame | None:
     """Load an OHLCV CSV cache with lowercase timestamp and OHLCV columns."""
     cache_path = Path(csv_path)

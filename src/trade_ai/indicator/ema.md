@@ -28,7 +28,7 @@ Keep EMA in relative form instead of prices, so modal can train on different sto
 
 - Here is why that approach works so well for our pipeline:
   - Price Scale Independence: A stock trading at ₹600 (like SBIN) and a stock trading at ₹2,500 (like Reliance) will generate vastly different absolute price values. By converting them to relative distances, a 1% pull-back from the 50 EMA looks identical to the neural network whether the stock is priced at ₹50 or ₹5,000.
-  - Seamless Multi-Stock Training: This is precisely what allows your training loop in train.py to iterate through completely different tickers in STOCK_METADATA and train a single unified model that understands universal market geometry rather than memorizing a single stock's price.
+  - Multi-Stock Training: Relative EMA distances help keep indicator values comparable across tickers. The active LightGBM and GRU trainers iterate through `STOCK_METADATA` and include these features in their inputs.
 
 
 ## How Professionals & Institutions Use the EMA

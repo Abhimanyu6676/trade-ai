@@ -1,65 +1,68 @@
 # trade-ai Current Context
 
-Last reviewed: 2026-10-22.
+Last reviewed: 2026-10-23.
 
-## Purpose and Architecture
+## Purpose and Runtime Flow
 
-A Python/`uv` project for market-data analysis and GRU-based directional forecasts. The current app does not place broker orders.
+`trade-ai` is a Python application for market-data forecasts. It trains a LightGBM classifier and a PyTorch GRU classifier on three Triple Barrier outcomes. It displays forecasts through Gradio and exposes a small FastAPI parser API. It does not submit broker orders.
 
-1. `src/trade_ai/app.py` accepts prompts and presents results through Gradio on port 7860.
-2. `src/trade_ai/server/server.py` exposes a FastAPI hello-world endpoint and mounts `GET` and `POST /api/chat` routes from `chat_route.py` on port 3010. Uvicorn runs in a background thread started by `app.py`.
-3. `ai_parser.py` uses local Ollama `qwen2.5:0.5b` to extract actions, tickers, and lookback days. It detects supported reset and training commands before calling Ollama. Its date anchor comes from the system date at process startup.
-4. `openalgo_client.py` owns the shared OpenAlgo client and performs history/status API calls.
-5. `data_engine.py` requests candles through that client and builds features; `prediction_engine.py` owns model loading, lifecycle, and inference.
-6. `util.py` provides shared OHLCV normalization for inference, downloaded data, and CSV cache reads.
-7. `features.py` builds normalized base and multi-timeframe inputs using indicator formulas from `src/trade_ai/indicator/`.
-8. `stock_metadata.py` defines enum-backed cap and sector categories, ticker mappings, defaults, and categorical encoding.
-9. `model.py` defines the GRU classifier; `train.py` requests history, normalizes/caches it, and trains the model.
+The market-analysis path is:
+
+1. `app.py` asks `ai_parser.py` to extract an action, ticker, and `days_back` from the prompt. The parser uses local Ollama (`qwen2.5:0.5b`) except for directly detected training requests.
+2. `brain/data_engine.py` fetches one-minute OHLCV candles through the shared OpenAlgo client. It requests a 30-calendar-day feature warm-up before the display-history range, sorts/deduplicates candles, and caps input at 25,000 rows.
+3. `brain/features.py` builds the multi-timeframe features. The data engine uses this result for the display grid and passes the raw OHLCV frame to inference.
+4. `brain/prediction_engine.py` engineers model-specific features, gets probabilities from the available model(s), and blends the probabilities when both models are ready.
+
+The FastAPI `/api/chat` routes only parse prompts; they do not fetch market data or run predictions. Starting `app.py` starts Gradio on port 7860 and the FastAPI server on port 3010.
 
 ## Data and Feature Contract
 
-- OHLCV input columns use lowercase names throughout: `timestamp`, `open`, `high`, `low`, `close`, and `volume`. The OpenAlgo client and CSV cache loader lowercase these known columns at ingestion; indicators and feature code consume the lowercase names.
-- Input data must be one-minute OHLCV candles timestamped at candle open. The UI exposes only `1m`, and `fetch_and_clean_candles` rejects other source intervals.
-- Resampled bars are timestamped at their right edge. Backward as-of joins use only completed bars; indicator warmup values must not be backfilled from future rows. `resample_ohlcv()` uses pandas' default interval boundaries unless an offset is explicitly provided.
-- `add_multi_timeframe_features()` in `features.py` calculates 14-period RSI, 14-period ATR, EMA distance for spans 9/21/50, a bullish FVG signal, and a liquidity-sweep signal for each default timeframe: 1m, 3m, 5m, 15m, 30m, and 1h.
-- The active model pipeline uses the simple FVG and liquidity-sweep signals. Extended FVG/liquidity features, BAG, VWAP, ORB, MACD, and the daily macro gate are not model inputs. Indicator formulas are in separate modules under `src/trade_ai/indicator/`.
-- `FEATURE_COLUMNS` in `features.py` is authoritative for model inputs. The current schema has 55 columns: three base returns; for each of 1m, 3m, 5m, 15m, 30m, and 1h, 14-period RSI, 14-period ATR, EMA 9/21/50 distances, the FVG signal, and the liquidity-sweep signal; and ten enum-generated stock metadata flags. The schema is built from `DEFAULT_TIMEFRAMES` and `DEFAULT_EMA_SPANS` so it stays aligned with `add_multi_timeframe_features()`. VWAP, ORB, macro trend, extended FVG, and extended liquidity features are not model inputs.
-- `stock_metadata.py` owns the `MarketCap` and `Sector` string enums, typed `StockMetadata` registry, unknown-ticker defaults, enum-generated feature names, and `encode_categorical_metadata()`. Adding an enum member automatically adds its one-hot column to feature output and `FEATURE_COLUMNS`. Unknown tickers default to mid-cap and `OTHER` sector.
-- Higher-timeframe EMA values are represented as scale-independent distances from the current close.
-- Forward-return labels are created only when `compute_normalized_features(..., include_targets=True)` is used for training. Inference leaves targets disabled so the newest rows with complete features remain available.
+- Source data is one-minute candles timestamped at candle open. Expected columns are `timestamp`, `open`, `high`, `low`, `close`, and `volume`.
+- `util.merge_ohlcv_history()` lowercases known OHLCV names, parses timestamps, stable-sorts chronologically, and keeps the later-appended row for duplicate timestamps. The data engine applies the 25,000-row cap after sorting, preserving the newest tail.
+- For a request of `days_back`, the display start is calculated as `today - (int(days_back * 1.5) + 5)` calendar days. The data request starts another 30 calendar days earlier to warm up indicators. The displayed frame is sliced back to the display start after feature calculation. This is a relative lookback from today, not an arbitrary target-date/time-window API.
+- `FEATURE_COLUMNS` in `brain/features.py` contains 55 engineered inputs: three return features; seven indicators for each of 1m, 3m, 5m, 15m, 30m, and 1h (RSI, ATR, EMA 9/21/50 distances, FVG, and liquidity sweep); plus ten stock metadata flags.
+- The model training and inference code selects all computed frame columns except `timestamp` and `target`; with standard OHLCV input, this means the 55 engineered columns plus the five raw OHLCV values (60 inputs). Extra columns returned by a data source can also enter this dynamic selection, so use the same input schema for training and inference.
+- `model_type="gru"` scales RSI to 0–1; `model_type="lgb"` keeps RSI on its regular scale. The other listed feature calculations are shared. Multi-timeframe bars are mapped back with backward `merge_asof` joins to use completed bars only.
+- Feature calculation runs on the full chronological history, allowing prior sessions to warm up higher-timeframe indicators such as EMA 50 on 1h bars. GRU sequence windows are separately restricted to one calendar date.
+- The 30-day buffer is not a mathematical guarantee that an EMA is fully converged. The user-facing market close is 15:15, with candle timestamps at candle open; the 15:14 candle is the last eligible candle and 15:15 is excluded.
 
-## Model and Training State
+## Labels and Training
 
-- `StockPredictionBrain` builds its GRU input size from `len(FEATURE_COLUMNS)`.
-- Checkpoints store a feature-schema version and exact feature names. Untagged or mismatched checkpoints are rejected, even when tensor dimensions match. The current 55-input schema is incompatible with older checkpoints. Retrain after feature formula or schema changes, even if the number of columns stays the same. Inference stays disabled until a compatible checkpoint is available.
-- Checkpoints are saved to `.run_cache/gru_trading_model.pth` after successful epochs.
-- Prompt requests such as “reset your brain” or “start as new” are handled by `prediction_engine.reset_prediction_brain()`. Reset copies an existing checkpoint to a unique `.run_cache/gru_trading_model_backup_<timestamp>.pth`, removes the original, clears the loaded model object, and disables inference until retraining. If backup creation fails, the checkpoint is retained and the UI reports the error.
-- Prompt requests such as “start training” or “train the model” are routed to `train.start_model_training()`. Training orchestration and its background thread live in `train.py`; `prediction_engine.py` owns inference state and checkpoint loading. Duplicate starts are rejected while training runs in the app process. Inference is disabled during training; the completed checkpoint is loaded into the live app automatically. Training resumes only from a compatible schema-tagged checkpoint; use the reset command first for a fresh model. Progress and failures go to the app server console. Stopping/restarting the app also stops this in-process training run.
-- Training uses `SlidingWindowDataset`, which holds one ticker's feature matrix and returns sequence windows on demand. Keep the DataLoader batch size at 256 and avoid materializing all overlapping windows.
-- Training currently runs five epochs with sequence length five, Adam, and `ReturnWeightedBCELoss`. Its per-batch weights scale absolute five-minute returns by 1000 plus a unit baseline, then multiply by a per-ticker positive-class weight capped at 10. Tickers with only one direction label are skipped. Per-ticker/epoch logs include positive/non-positive label counts and min/max/mean predicted probabilities.
-- Direction targets are binary (`Future_Return_5m > 0`), not triple-barrier labels or a three-class neutral target. Probability diagnostics describe training behavior and are not intended to force high-confidence forecasts.
-- Historical minute CSVs are cached under `tickData/`, one file per ticker. Broker downloads use three attempts per chunk.
+- `brain/labels.py` creates three mutually exclusive targets: `-1` stop-loss first, `0` timeout, `1` take-profit first. It checks future candle closes, allows entries from 10:00 through 14:30 by default, scans at most 60 future bars, and stops at the entry date boundary or 15:15 market close. Inputs must already be sorted chronologically.
+- `brain/train_lgb.py` loads each ticker's cached CSV or downloads history from 2020 in 30-calendar-day API chunks (three retries per chunk). It calculates LGB features, labels rows, maps classes to `0/1/2`, concatenates per-ticker data, and trains up to 500 LightGBM rounds with early stopping. Its 80/20 split is unshuffled after ticker-wise concatenation; it is not a globally interleaved time split.
+- `brain/train_gru.py` trains a two-layer, 64-hidden-unit, three-class GRU. Defaults are 10 epochs, 30 candles per sequence, batch size 256, and Adam. Sliding windows must remain on one calendar date; unlabeled feature rows can serve as input context, but a window's final row must have a label. The DataLoader shuffles the valid windows and drops incomplete batches.
+- Both trainers use `src/trade_ai/tickData/<TICKER>_history.csv` when it exists. Existing cache files are read as-is; they are not automatically refreshed. If missing, the trainers download and cache history.
+- `brain/train_master.py` runs LightGBM then GRU. The UI's “start training” action runs the master pipeline on a daemon thread. A lock protects start/status state and prevents duplicate concurrent starts in that app process. The module can also run synchronously with `uv run python -m trade_ai.brain.train_master`.
+- The master trainer does not currently call the prediction engine's reload method after it saves checkpoints. If an inference engine already holds older model objects when background training finishes, restart the app or explicitly reload the prediction engine before expecting it to use the new checkpoints.
+- Model files are written under `src/trade_ai/.run_cache/`: `lgb_trading_model.txt` and `gru_trading_model.pth`.
 
-## OpenAlgo and Data Utilities
+## Prediction Behavior and Known Limits
 
-- Route every OpenAlgo SDK call through the shared `openalgo` instance in `openalgo_client.py`. It lazily creates one SDK client from environment variables and exposes history and analyzer-status operations.
-- Training and inference use this shared client.
-- `util.py` provides `lowercase_ohlcv_columns(df)`, used at OpenAlgo and CSV cache boundaries to lowercase only the known timestamp/OHLCV column names while preserving other columns. `load_cached_ohlcv(path)` returns a cached DataFrame with this lowercase column contract.
+- `brain/prediction_engine.py` eagerly loads an existing LightGBM model and lazily initializes/loads the GRU when prediction is requested.
+- If both models return probabilities, the engine takes a 50/50 arithmetic mean. If only one returns probabilities, it uses that model alone. It returns the class with the largest probability (`-1`, `0`, or `1`) and that probability as confidence. Probabilities are not calibrated confidence guarantees.
+- GRU training and app inference use the shared `DEFAULT_SEQUENCE_LENGTH` of 30 candles, defined in `brain/sequence_loader.py`.
+- `sequence_loader.latest_session_sequence()` selects the last requested number of valid feature rows from the newest calendar date. It does not verify market hours or that timestamps are exactly one minute apart. Training windows likewise enforce calendar-date boundaries, not missing-candle continuity.
+- `model.py` contains a separate `StockPredictionBrain` and schema-tagged checkpoint helpers; the active master training/inference flow uses `GRUTradingBrain` in `brain/train_gru.py` and does not use those helpers.
+- There is no liquidity/spread filter, probability calibration, automatic order submission, or documented 10-million-row processing loop in the active pipeline.
 
-## Environment and Run Commands
+## Source Map
 
-- Requires Python 3.14 or newer (`.python-version`) and `uv`.
-- `OPENALGO_API_KEY` is required. `OPENALGO_HOST` is optional and defaults to the endpoint configured in `openalgo_client.py`.
-- `.env` is Git-ignored, but the application does not load it automatically. Export its values into the shell before running commands, for example:
+- `src/trade_ai/app.py`: Gradio UI and action routing.
+- `src/trade_ai/ai_parser.py`: local Ollama prompt parsing.
+- `src/trade_ai/brain/data_engine.py`: OpenAlgo market-history fetch, warm-up buffer, feature display, inference call.
+- `src/trade_ai/brain/features.py`, `labels.py`, `sequence_loader.py`: feature schema, Triple Barrier targets, same-session GRU windows.
+- `src/trade_ai/brain/train_lgb.py`, `train_gru.py`, `train_master.py`: individual trainers and master orchestration.
+- `src/trade_ai/brain/prediction_engine.py`: model loading and ensemble inference.
+- `src/trade_ai/openalgo_client.py`, `util.py`, `stock_metadata.py`: shared client, candle utilities, metadata inputs.
+- `src/trade_ai/indicator/`: indicator calculations and their explanatory Markdown files.
+- `src/trade_ai/server/`: FastAPI application and prompt-parsing routes.
 
-  ```sh
-  set -a
-  source .env
-  set +a
-  ```
+## Environment and Commands
 
-- Install/sync dependencies with `uv sync`.
-- Launch the Gradio UI with `uv run python src/trade_ai/app.py`; it also starts the FastAPI server on port 3010.
-- Train with `uv run python src/trade_ai/train.py`.
-- From the running UI, enter “start training” to launch the same training job in the background; check the app server console for progress.
-- If the VPS has `noexec` temporary storage issues, use the repo-local cache as `TMPDIR` and `PIP_CACHE_DIR`; detailed steps are in `setup-start.md`.
+- Python 3.14 or newer and `uv` are required.
+- `OPENALGO_API_KEY` is required. `OPENALGO_HOST` is optional and defaults to the host in `openalgo_client.py`.
+- The app does not load `.env` automatically; export its values into the shell before starting.
+- Install dependencies with `uv sync`.
+- Start the app with `uv run python src/trade_ai/app.py` (Gradio 7860; FastAPI 3010).
+- Run the full dual-model training pipeline in the foreground with `uv run python -m trade_ai.brain.train_master`, or request “start training” in the UI for background execution.
+- No test command is currently configured in `pyproject.toml`.

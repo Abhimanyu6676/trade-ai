@@ -4,7 +4,11 @@ import pandas as pd
 
 from trade_ai.brain.features import compute_normalized_features
 from trade_ai.brain.prediction_engine import run_ai_prediction_inference
+from trade_ai.brain.sequence_loader import DEFAULT_SEQUENCE_LENGTH
 from trade_ai.openalgo_client import openalgo
+from trade_ai.util import merge_ohlcv_history
+
+FEATURE_LOOKBACK_CALENDAR_DAYS = 30
 
 
 def fetch_and_clean_candles(ticker: str, days_back: int, interval: str, exchange: str):
@@ -21,9 +25,14 @@ def fetch_and_clean_candles(ticker: str, days_back: int, interval: str, exchange
     end_date = datetime.date.today()
     # Add a small buffer multiplier to account for weekends and holidays
     calendar_buffer_days = int(days_back * 1.5) + 5
-    start_date = end_date - datetime.timedelta(days=calendar_buffer_days)
+    display_start_date = end_date - datetime.timedelta(days=calendar_buffer_days)
+    # Keep the requested display window intact while fetching enough prior
+    # sessions to warm up higher-timeframe indicators such as the 1h EMA 50.
+    history_start_date = display_start_date - datetime.timedelta(
+        days=FEATURE_LOOKBACK_CALENDAR_DAYS
+    )
 
-    start_str = start_date.strftime("%Y-%m-%d")
+    start_str = history_start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
 
     try:
@@ -42,6 +51,9 @@ def fetch_and_clean_candles(ticker: str, days_back: int, interval: str, exchange
         if not isinstance(df, pd.DataFrame) or df.empty:
             return None, "API Empty Payload Error", 0.0
 
+        # Normalize order before trimming so the retained tail is the newest data.
+        df = merge_ohlcv_history(df)
+
         # Increased row cap to safely allow ~60 days of 1m history (~22,500 rows max)
         # without overflowing your 4GB VPS RAM during feature generation.
         MAX_ALLOWED_ROWS = 25000
@@ -51,18 +63,25 @@ def fetch_and_clean_candles(ticker: str, days_back: int, interval: str, exchange
             )
             df = df.tail(MAX_ALLOWED_ROWS).reset_index(drop=True)
 
-        # Compute multi-timeframe normalized features for the current schema.
-        processed_df = compute_normalized_features(df, ticker)
+        # Engineer on the entire chronological history so higher-timeframe EMAs
+        # are warmed up before the requested/display window begins.
+        processed_df = compute_normalized_features(df, ticker, model_type="gru")
 
-        if processed_df.empty or len(processed_df) < 5:
+        if processed_df.empty:
             return None, "Insufficient Data After Feature Warmup", 0.0
 
         ai_signal, confidence = run_ai_prediction_inference(
-            # TODO has to send raw_df here
-            processed_df,
+            df,
             ticker,
-            sequence_length=5,
+            sequence_length=DEFAULT_SEQUENCE_LENGTH,
         )
+
+        display_timestamps = pd.to_datetime(processed_df["timestamp"])
+        processed_df = processed_df.loc[
+            display_timestamps.dt.date >= display_start_date
+        ].copy()
+        if processed_df.empty:
+            return None, "No candles found in the requested display window", 0.0
 
         display_layout = [
             col

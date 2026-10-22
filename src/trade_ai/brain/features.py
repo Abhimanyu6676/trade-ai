@@ -92,7 +92,7 @@ def compute_normalized_features(
     df["ROC_15m"] = df["close"].pct_change(15)
 
     # Section 2: EMA stacks, timeframe-specific indicators, and daily gate.
-    df = _add_multi_timeframe_features(df, model_type)
+    df = _add_multi_timeframe_features(df, model_type, timeframes, ema_spans, relative)
 
     # Section 3: Ticker-level market-cap and sector flags.
     df = encode_categorical_metadata(df, ticker)

@@ -1,16 +1,18 @@
 # trade-ai
 
-`trade-ai` is a Python application for generating market forecasts from historical one-minute OHLCV data. It retrieves market history through OpenAlgo, builds indicator-based inputs, and trains or runs a GRU model. A Gradio interface accepts prompts, while a local Ollama model parses supported requests.
+`trade-ai` forecasts market direction from one-minute OHLCV candles. It fetches history through OpenAlgo, calculates multi-timeframe features, and supports a three-class LightGBM and GRU ensemble. Gradio provides the main UI, while a local Ollama model parses natural-language requests.
 
-The project produces forecasts and does not submit broker orders.
+The project produces model forecasts only. It does not place or manage broker orders. A probability score is not a calibrated guarantee of prediction quality.
 
-## Main Capabilities
+## Pipeline
 
-- Fetch and cache historical market data through a shared OpenAlgo client.
-- Prepare market data and indicators for model training and inference.
-- Train the GRU model per ticker and save checkpoints locally.
-- Run a Gradio interface for forecast requests and training controls.
-- Parse supported natural-language requests with local Ollama.
+1. **Data ingestion:** OpenAlgo returns one-minute candle history. Inference adds 30 calendar days before the requested display range for feature warm-up, orders candles by timestamp, resolves duplicate timestamps in favor of later rows, and limits processing to 25,000 rows.
+2. **Feature engineering:** The pipeline calculates return features and RSI, ATR, EMA-distance, FVG, and liquidity-sweep features over 1m, 3m, 5m, 15m, 30m, and 1h intervals. GRU RSI is scaled to 0–1; LightGBM RSI uses its regular scale.
+3. **Labeling:** Training labels are `-1` (stop-loss first), `0` (timeout), or `1` (take-profit first). Label horizons stay within one calendar date and end before the configured 15:15 market close.
+4. **Training:** The master trainer trains LightGBM first, then the PyTorch GRU. The UI can start this pipeline in a background thread.
+5. **Inference:** The engine combines model probabilities 50/50 when both models return results, and falls back to the available model if only one is ready.
+
+GRU training and app inference share a 30-candle sequence-length setting. See [context.md](context.md) for implementation details and known limitations.
 
 ## Getting Started
 
@@ -25,34 +27,53 @@ uv run python src/trade_ai/app.py
 
 Set `OPENALGO_API_KEY` in the shell before starting the application or training. `OPENALGO_HOST` is optional. The application does not load `.env` automatically; setup-start.md explains how to export local settings.
 
+Run the full dual-model training pipeline in the foreground with:
+
+```sh
+uv run python -m trade_ai.brain.train_master
+```
+
 ## Project Structure
-Always update this section whenever there is project structure change
 
 ```text
 trade-ai/
-├── agents.md                 # Agent handoff and maintenance instructions
-├── context.md                # Current architecture and behavior notes
-├── readme.md                 # Project summary and entry point
-├── setup-start.md            # Setup, startup, and troubleshooting guide
-├── pyproject.toml            # Python project metadata and dependencies
-├── uv.lock                   # Locked dependency versions
-├── .python-version           # Required Python version
-├── tickData/                 # Cached historical market-data CSV files
+├── agents.md                         # Agent workflow and documentation maintenance rules
+├── context.md                        # Current architecture, contracts, and known limitations
+├── readme.md                         # Project overview and structure
+├── setup-start.md                    # Installation, environment, startup, and troubleshooting
+├── pyproject.toml                    # Project metadata and dependencies
+├── uv.lock                           # Locked dependency versions
+├── .python-version                   # Python version requirement
+├── nodemon.json                      # Optional development restart configuration
 └── src/trade_ai/
-    ├── app.py                # Gradio application
-    ├── ai_parser.py          # Prompt parsing through local Ollama
-    ├── data_engine.py        # Market data retrieval and processing
-    ├── features.py           # Model input preparation
-    ├── model.py              # GRU model definition
-    ├── openalgo_client.py    # Shared OpenAlgo client
-    ├── prediction_engine.py  # Model loading and inference
-    ├── stock_metadata.py     # Stock category and ticker metadata
-    ├── train.py              # Model training
-    ├── util.py               # Shared data utilities
-    ├── server                # Python server directory
-        ├── server.md         # holds the server endpoints notes and description
-        ├── server.py         # Main server File
-    └── indicator/            # Indicator calculations and notes
+    ├── __init__.py                   # Package entry point
+    ├── app.py                        # Gradio UI and action routing
+    ├── ai_parser.py                  # Local Ollama intent parsing
+    ├── openalgo_client.py            # Shared OpenAlgo SDK client
+    ├── stock_metadata.py             # Ticker metadata and encoded categories
+    ├── util.py                       # OHLCV ordering, merge, and resampling helpers
+    ├── model.py                      # Separate GRU class/checkpoint helpers (not active trainer)
+    ├── brain/
+    │   ├── data_engine.py             # History fetch, feature warm-up, display, inference call
+    │   ├── features.py                # Multi-timeframe model features
+    │   ├── labels.py                  # Intraday Triple Barrier labels
+    │   ├── sequence_loader.py         # Same-calendar-date GRU sequence helpers
+    │   ├── train_lgb.py               # LightGBM data preparation and trainer
+    │   ├── train_gru.py               # PyTorch GRU and session-safe dataset
+    │   ├── train_master.py            # Sequential dual-model training orchestration
+    │   ├── prediction_engine.py       # Lazy GRU loading and model probability blending
+    │   ├── data_engine.md             # Data ingestion behavior notes
+    │   ├── prediction_engine.md       # Ensemble behavior notes
+    │   └── sequence_loader.md         # Session and sequence boundary notes
+    ├── indicator/
+    │   ├── *.py                       # Indicator implementations
+    │   └── *.md                       # Indicator documentation
+    ├── server/
+    │   ├── server.py                  # FastAPI server entry point
+    │   ├── chat_route.py              # Prompt parsing routes
+    │   └── server.md                 # API endpoint notes
+    └── strategy/
+        └── strategy.md               # Strategy notes
 ```
 
-Runtime data and model checkpoints are stored under `.run_cache/` when created.
+Training caches and model checkpoints are runtime files under `src/trade_ai/tickData/` and `src/trade_ai/.run_cache/` when generated; they are not part of the source tree. The prediction history request also caps processing at 25,000 rows; this is not a 10-million-row batch-processing loop.

@@ -3,7 +3,10 @@
 import gradio as ui
 
 from trade_ai.ai_parser import extract_market_intent
-from trade_ai.data_engine import fetch_and_clean_candles, get_openalgo_status_message
+from trade_ai.brain.data_engine import (
+    fetch_and_clean_candles,
+    get_openalgo_status_message,
+)
 from trade_ai.server.server import start_server
 
 

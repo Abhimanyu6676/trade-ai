@@ -112,17 +112,17 @@ export PIP_CACHE_DIR="$(pwd)/.run_cache"
 uv run python src/trade_ai/app.py
 ```
 
-Run training in the foreground:
+Run both model trainers in sequence in the foreground (LightGBM, then GRU):
 
 ```sh
-uv run python src/trade_ai/train.py
+uv run python -m trade_ai.brain.train_master
 ```
 
 Stop a foreground app or training process with `Ctrl+C`.
 
 ## First Start
 
-if .pth brain file is missing train you modal first
+The app can start without trained checkpoints, but it cannot produce a model forecast until at least one model checkpoint exists. Run the master training command above to create both checkpoints. The ensemble blends them when both are available.
 
 ## Common Error Fixes
 
