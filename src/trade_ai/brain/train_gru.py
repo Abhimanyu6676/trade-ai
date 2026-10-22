@@ -8,10 +8,11 @@ import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader, Dataset
 
-from trade_ai.features import add_multi_timeframe_features
+from trade_ai.features import compute_normalized_features
 from trade_ai.openalgo_client import openalgo
-from trade_ai.stock_metadata import STOCK_METADATA, encode_categorical_metadata
-from trade_ai.training_engine.labels import apply_triple_barrier
+from trade_ai.stock_metadata import STOCK_METADATA
+
+from .labels import apply_triple_barrier
 
 # Directory and path configurations
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -195,8 +196,7 @@ def train_gru_model(
                 continue
 
             # Feature engineering and metadata encoding
-            df_feat = add_multi_timeframe_features(raw_df)
-            df_feat = encode_categorical_metadata(df_feat, ticker)
+            df_feat = compute_normalized_features(raw_df, ticker, model_type="gru")
 
             # Triple barrier target generation
             df_feat["target"] = apply_triple_barrier(

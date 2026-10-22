@@ -2,9 +2,9 @@ import datetime
 
 import pandas as pd
 
+from trade_ai.brain.prediction_engine import run_ai_prediction_inference
 from trade_ai.features import compute_normalized_features
 from trade_ai.openalgo_client import openalgo
-from trade_ai.training_engine.prediction_engine import run_ai_prediction_inference
 
 
 def fetch_and_clean_candles(ticker: str, days_back: int, interval: str, exchange: str):
@@ -58,7 +58,10 @@ def fetch_and_clean_candles(ticker: str, days_back: int, interval: str, exchange
             return None, "Insufficient Data After Feature Warmup", 0.0
 
         ai_signal, confidence = run_ai_prediction_inference(
-            processed_df, sequence_length=5
+            # TODO has to send raw_df here
+            processed_df,
+            ticker,
+            sequence_length=5,
         )
 
         display_layout = [

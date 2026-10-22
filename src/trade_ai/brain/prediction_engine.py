@@ -6,9 +6,9 @@ import numpy as np
 import pandas as pd
 import torch
 
-from trade_ai.features import add_multi_timeframe_features
-from trade_ai.stock_metadata import encode_categorical_metadata
-from trade_ai.training_engine.train_gru import GRUTradingBrain
+from trade_ai.features import compute_normalized_features
+
+from .train_gru import GRUTradingBrain
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CACHE_DIR = os.path.join(BASE_DIR, ".run_cache")
@@ -80,23 +80,31 @@ class EnsemblePredictionEngine:
             logger.warning("⚠️ No trained models loaded in prediction engine.")
             return 0, 0.0, {"error": "Models not loaded"}
 
-        # 1. Feature Engineering & Metadata Encoding
-        df_feat = add_multi_timeframe_features(raw_df)
-        df_feat = encode_categorical_metadata(df_feat, ticker)
+        # 1. Separate Feature Engineering & Metadata Encoding
+        df_lgb_feat = compute_normalized_features(raw_df, ticker, model_type="lgb")
+
+        df_gru_feat = compute_normalized_features(raw_df, ticker, model_type="gru")
 
         # Exclude non-feature columns
         exclude_cols = ["timestamp", "target"]
-        feature_cols = [col for col in df_feat.columns if col not in exclude_cols]
+        lgb_feature_cols = [
+            col for col in df_lgb_feat.columns if col not in exclude_cols
+        ]
+        gru_feature_cols = [
+            col for col in df_gru_feat.columns if col not in exclude_cols
+        ]
 
-        if len(df_feat) < sequence_length:
+        if len(df_lgb_feat) < sequence_length:
             return 0, 0.0, {"error": "Insufficient rows for sequence length"}
 
         # Extract latest snapshot for LightGBM
-        latest_snapshot = df_feat[feature_cols].iloc[[-1]]
+        latest_snapshot = df_lgb_feat[lgb_feature_cols].iloc[[-1]]
 
         # Extract rolling window sequence for GRU
         sequence_features = (
-            df_feat[feature_cols].iloc[-sequence_length:].to_numpy(dtype=np.float32)
+            df_gru_feat[gru_feature_cols]
+            .iloc[-sequence_length:]
+            .to_numpy(dtype=np.float32)
         )
 
         lgb_probs = None
@@ -117,7 +125,7 @@ class EnsemblePredictionEngine:
         if self.gru_model is None and os.path.exists(GRU_MODEL_PATH):
             # Lazy-load GRU model dynamically once input dimension is known
             try:
-                input_dim = len(feature_cols)
+                input_dim = len(gru_feature_cols)
                 self.gru_model = GRUTradingBrain(
                     input_dim=input_dim, hidden_dim=64, num_layers=2, num_classes=3
                 ).to(self.device)

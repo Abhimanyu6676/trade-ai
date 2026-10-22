@@ -21,7 +21,7 @@ def controller_pipeline(user_query: str, interval: str, exchange: str):
         return "reset_message", "MODEL", exchange, "BRAIN RESET", "0.0%", None
 
     if action == "start_training":
-        from trade_ai.training_engine.train_master import start_master_training
+        from trade_ai.brain.train_master import start_master_training
 
         training_message = start_master_training()
         return training_message, "MODEL", exchange, "TRAINING", "0.0%", None

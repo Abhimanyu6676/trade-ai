@@ -6,10 +6,11 @@ import lightgbm as lgb
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from trade_ai.features import add_multi_timeframe_features
+from trade_ai.features import compute_normalized_features
 from trade_ai.openalgo_client import openalgo
-from trade_ai.stock_metadata import STOCK_METADATA, encode_categorical_metadata
-from trade_ai.training_engine.labels import apply_triple_barrier
+from trade_ai.stock_metadata import STOCK_METADATA
+
+from .labels import apply_triple_barrier
 
 # Configure paths and logging
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -133,7 +134,9 @@ def prepare_training_data() -> tuple[pd.DataFrame, pd.Series]:
     all_features = []
     all_targets = []
 
-    for ticker in STOCK_METADATA.keys():
+    tickers = list(STOCK_METADATA.keys())
+
+    for ticker in tickers:
         logger.info("Processing feature pipeline for %s...", ticker)
         raw_df = load_or_fetch_stock_data(ticker)
         if raw_df is None or raw_df.empty:
@@ -141,10 +144,7 @@ def prepare_training_data() -> tuple[pd.DataFrame, pd.Series]:
             continue
 
         # 1. Build multi-timeframe features
-        df_feat = add_multi_timeframe_features(raw_df)
-
-        # 2. Encode sector and market cap metadata features
-        df_feat = encode_categorical_metadata(df_feat, ticker)
+        df_feat = compute_normalized_features(raw_df, ticker, model_type="lgb")
 
         # 3. Generate Triple Barrier target labels (-1, 0, 1) with time filters
         df_feat["target"] = apply_triple_barrier(

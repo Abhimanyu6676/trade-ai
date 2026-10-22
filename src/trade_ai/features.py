@@ -1,3 +1,5 @@
+from typing import Literal
+
 import pandas as pd
 
 from trade_ai.indicator import (
@@ -17,12 +19,12 @@ DEFAULT_TIMEFRAMES = ("1m", "3m", "5m", "15m", "30m", "1h")
 DEFAULT_EMA_SPANS = (9, 21, 50)
 
 
-def add_multi_timeframe_features(
+def _add_multi_timeframe_features(
     df: pd.DataFrame,
+    model_type: Literal["gru", "lgb"],
     timeframes=None,
     ema_spans=None,
     relative: bool = True,
-    scale_rsi_0_1: bool = False,
 ) -> pd.DataFrame:
     """Orchestrates multi-timeframe feature calculations, safely merging
 
@@ -48,7 +50,7 @@ def add_multi_timeframe_features(
         features_tf = pd.DataFrame()
         features_tf["timestamp"] = tf_df["timestamp"]
         features_tf[f"RSI_14_{tf}"] = calculate_rsi(
-            tf_df, period=14, scale_0_1=scale_rsi_0_1
+            tf_df, period=14, scale_0_1=model_type == "gru"
         )
         features_tf[f"ATR_14_{tf}"] = calculate_atr(tf_df, period=14, relative=relative)
 
@@ -75,10 +77,10 @@ def add_multi_timeframe_features(
 def compute_normalized_features(
     df: pd.DataFrame,
     ticker: str,
+    model_type: Literal["gru", "lgb"],
     timeframes=None,
     ema_spans=None,
     relative: bool = True,
-    scale_rsi_0_1: bool = False,
     include_targets: bool = False,
 ) -> pd.DataFrame:
     """Build return features, technical indicators, metadata, and optional labels."""
@@ -90,7 +92,7 @@ def compute_normalized_features(
     df["ROC_15m"] = df["close"].pct_change(15)
 
     # Section 2: EMA stacks, timeframe-specific indicators, and daily gate.
-    df = add_multi_timeframe_features(df)
+    df = _add_multi_timeframe_features(df, model_type)
 
     # Section 3: Ticker-level market-cap and sector flags.
     df = encode_categorical_metadata(df, ticker)
