@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from trade_ai.features import FEATURE_COLUMNS
+from .brain.features import FEATURE_COLUMNS
 
 FEATURE_SCHEMA_VERSION = 4
 

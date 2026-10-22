@@ -6,8 +6,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from trade_ai.features import compute_normalized_features
-
+from .features import compute_normalized_features
 from .train_gru import GRUTradingBrain
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

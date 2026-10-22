@@ -6,10 +6,10 @@ import lightgbm as lgb
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from trade_ai.features import compute_normalized_features
 from trade_ai.openalgo_client import openalgo
 from trade_ai.stock_metadata import STOCK_METADATA
 
+from .features import compute_normalized_features
 from .labels import apply_triple_barrier
 
 # Configure paths and logging

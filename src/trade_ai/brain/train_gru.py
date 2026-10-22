@@ -8,10 +8,10 @@ import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader, Dataset
 
-from trade_ai.features import compute_normalized_features
 from trade_ai.openalgo_client import openalgo
 from trade_ai.stock_metadata import STOCK_METADATA
 
+from .features import compute_normalized_features
 from .labels import apply_triple_barrier
 
 # Directory and path configurations
