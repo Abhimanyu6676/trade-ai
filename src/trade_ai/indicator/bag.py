@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from trade_ai.indicator.fvg import detect_fvg_events
-from trade_ai.indicator.liquidity import calculate_liquidity
+from trade_ai.indicator.liquidity import calculate_liquidity_extended
 
 
 def calculate_bag(
@@ -25,7 +25,7 @@ def calculate_bag(
     low = bars["low"].to_numpy(dtype=float)
     close = bars["close"].to_numpy(dtype=float)
     if liquidity_values is None:
-        liquidity_values = calculate_liquidity(bars)
+        liquidity_values = calculate_liquidity_extended(bars)
     if fvg_events is None:
         fvg_events = detect_fvg_events(bars, liquidity_values=liquidity_values)
     event_direction = fvg_events["FVG_Event_Direction"].to_numpy()
@@ -57,9 +57,12 @@ def calculate_bag(
         elif active_direction == -1 and high[index] >= zone_lower:
             rejection[index] = float(current_close < zone_lower)
 
-        if active_direction == 1 and current_close < zone_lower:
-            active_direction = 0
-        elif active_direction == -1 and current_close > zone_upper:
+        if (
+            active_direction == 1
+            and current_close < zone_lower
+            or active_direction == -1
+            and current_close > zone_upper
+        ):
             active_direction = 0
 
         recent_fvgs = [

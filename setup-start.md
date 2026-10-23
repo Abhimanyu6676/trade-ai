@@ -10,6 +10,7 @@ Update it when setup or startup steps change, or when a new setup/start check is
 
 - Python 3.14 or newer, as specified by `.python-version` and `pyproject.toml`.
 - `uv` for dependency and project environment management.
+- The GNU OpenMP runtime (`libgomp1` on Debian/Ubuntu), required by LightGBM.
 - Ollama running locally with the `qwen2.5:0.5b` model available for prompt parsing.
 - An OpenAlgo endpoint and API key for market-data access.
 - nodemon installed globally for development hot reloads ```npm i -g nodemon```
@@ -127,6 +128,13 @@ Stop a foreground app or training process with `Ctrl+C`.
 The app can start without trained checkpoints, but it cannot produce a model forecast until at least one model checkpoint exists. Run the master training command above to create both checkpoints. The ensemble blends them when both are available.
 
 ## Common Error Fixes
+
+- **LightGBM fails with `libgomp.so.1: cannot open shared object file`:** install the OS OpenMP runtime on Debian/Ubuntu:
+
+  ```sh
+  sudo apt-get update
+  sudo apt-get install -y libgomp1
+  ```
 
 - **`OPENALGO_API_KEY` missing:** source `.env` into the same shell before launching the app or training. The app does not read `.env` on its own.
 - **Ollama connection or model error:** start the Ollama service and run `ollama pull qwen2.5:0.5b` if the model is not listed by `ollama list`.

@@ -60,6 +60,7 @@ The FastAPI `/api/chat` routes only parse prompts; they do not fetch market data
 ## Environment and Commands
 
 - Python 3.14 or newer and `uv` are required.
+- LightGBM's native library needs the GNU OpenMP runtime (`libgomp1` on Debian/Ubuntu).
 - `OPENALGO_API_KEY` is required. `OPENALGO_HOST` is optional and defaults to the host in `openalgo_client.py`.
 - The app does not load `.env` automatically; export its values into the shell before starting.
 - Install dependencies with `uv sync`.
