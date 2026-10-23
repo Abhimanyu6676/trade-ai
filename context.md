@@ -13,7 +13,7 @@ The market-analysis path is:
 3. `brain/features.py` builds the multi-timeframe features. The data engine uses this result for the display grid and passes the raw OHLCV frame to inference.
 4. `brain/prediction_engine.py` engineers model-specific features, gets probabilities from the available model(s), and blends the probabilities when both models are ready.
 
-The FastAPI `/api/chat` routes only parse prompts; they do not fetch market data or run predictions. `GET /api/openalgo/analyser-status` queries the configured OpenAlgo client and returns a small status summary for the browser chat. Starting `app.py` starts Gradio on port 7860 and the FastAPI server on port 3010. The server allows browser requests from the Astro chat origins listed in `TRADE_AI_CHAT_ORIGINS`, a comma-separated environment variable that defaults to `http://localhost:4000,http://127.0.0.1:4000`. Set it to the deployed frontend origin or origins when hosting the chat elsewhere.
+The FastAPI `/api/chat` routes only parse prompts; they do not fetch market data or run predictions. `GET /api/openalgo/analyser-status` queries the configured OpenAlgo client and returns a small status summary for the browser chat. Starting `app.py` starts Gradio on port 7860 and the FastAPI server on port 3010. The server allows browser requests from the Astro chat origins listed in `TRADE_AI_CHAT_ORIGINS`, a comma-separated environment variable that defaults to `http://localhost:3011,http://127.0.0.1:3011`. Set it to the deployed frontend origin or origins when hosting the chat elsewhere.
 
 ## Data and Feature Contract
 

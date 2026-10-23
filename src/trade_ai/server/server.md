@@ -18,8 +18,8 @@ For API-only use, it can also be started directly with
 The server binds to `0.0.0.0`, so it can accept connections from outside the
 local machine when the network permits it.
 
-Browser clients are allowed by CORS from `http://localhost:4000` and
-`http://127.0.0.1:4000` by default for the Astro chat frontend. Set
+Browser clients are allowed by CORS from `http://localhost:3011` and
+`http://127.0.0.1:3011` by default for the Astro chat frontend. Set
 `TRADE_AI_CHAT_ORIGINS` to a comma-separated list of exact frontend origins
 for deployment, for example `https://chat.example.com`. The setting contains
 origins only (scheme, host, and optional port), not paths.

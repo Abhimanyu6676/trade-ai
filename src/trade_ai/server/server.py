@@ -18,7 +18,7 @@ _allowed_origins = [
     origin.strip()
     for origin in os.getenv(
         "TRADE_AI_CHAT_ORIGINS",
-        "http://localhost:4000,http://127.0.0.1:4000",
+        "http://localhost:3011,http://127.0.0.1:3011",
     ).split(",")
     if origin.strip()
 ]
