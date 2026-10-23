@@ -32,7 +32,7 @@ def merge_ohlcv_history(
         if frame is not None and not frame.empty
     ]
     if not frames:
-        return pd.DataFrame(columns=history_df.columns)
+        return lowercase_ohlcv_columns(history_df.iloc[0:0])
 
     combined = lowercase_ohlcv_columns(pd.concat(frames, ignore_index=True))
     if "timestamp" not in combined.columns:

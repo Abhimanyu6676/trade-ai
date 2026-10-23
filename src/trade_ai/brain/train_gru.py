@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from trade_ai.openalgo_client import openalgo
 from trade_ai.stock_metadata import STOCK_METADATA
+from trade_ai.util import lowercase_ohlcv_columns
 
 from .features import compute_normalized_features
 from .labels import apply_triple_barrier
@@ -154,9 +155,7 @@ def download_stock_history_in_chunks(
     if not all_chunks:
         return None
 
-    full_df = pd.concat(all_chunks).drop_duplicates()
-    if "Timestamp" in full_df.columns and "timestamp" not in full_df.columns:
-        full_df = full_df.rename(columns={"Timestamp": "timestamp"})
+    full_df = lowercase_ohlcv_columns(pd.concat(all_chunks).drop_duplicates())
 
     return full_df.sort_values(by="timestamp").reset_index(drop=True)
 
@@ -168,7 +167,7 @@ def load_or_fetch_stock_data(ticker: str) -> pd.DataFrame | None:
 
     if os.path.exists(stock_csv):
         logger.info("[%s] Loading local dataset: %s", ticker, stock_csv)
-        return pd.read_csv(stock_csv)
+        return lowercase_ohlcv_columns(pd.read_csv(stock_csv))
 
     logger.info("[%s] Local cache missing. Downloading historical data...", ticker)
     df = download_stock_history_in_chunks(ticker)

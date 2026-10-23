@@ -13,7 +13,7 @@ from trade_ai.stock_metadata import (
     METADATA_FEATURE_COLUMNS,
     encode_categorical_metadata,
 )
-from trade_ai.util import resample_ohlcv
+from trade_ai.util import lowercase_ohlcv_columns, resample_ohlcv
 
 DEFAULT_TIMEFRAMES = ("1m", "3m", "5m", "15m", "30m", "1h")
 DEFAULT_EMA_SPANS = (9, 21, 50)
@@ -84,7 +84,7 @@ def compute_normalized_features(
     include_targets: bool = False,
 ) -> pd.DataFrame:
     """Build return features, technical indicators, metadata, and optional labels."""
-    df = df.copy()
+    df = lowercase_ohlcv_columns(df)
 
     # Section 1: 1m, 5m, 15m Rate of Change features.
     df["ROC_1m"] = df["close"].pct_change(1)
