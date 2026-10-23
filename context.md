@@ -40,7 +40,7 @@ The market-analysis path is:
 - `model/models.py` loads each existing checkpoint when the application starts. It infers GRU input width from the checkpoint, so GRU loading does not depend on a first prediction or cached candle data. Missing files produce a warning to train that model first.
 - `model/prediction_engine.py` only requests loaded instances from `models.py`, performs inference, and blends available model probabilities. It does not load, unload, back up, or reload models.
 - If both models return probabilities, the engine takes a 50/50 arithmetic mean. If only one returns probabilities, it uses that model alone. It returns the class with the largest probability (`-1`, `0`, or `1`) and that probability as confidence. Probabilities are not calibrated confidence guarantees.
-- GRU training and app inference use the shared `DEFAULT_SEQUENCE_LENGTH` of 30 candles, defined in `model/sequence_loader.py`.
+- GRU training and app inference use the shared `DEFAULT_SEQUENCE_LENGTH` of 30 candles, defined in `model/training/sequence_loader.py`.
 - `sequence_loader.latest_session_sequence()` selects the last requested number of valid feature rows from the newest calendar date. It does not verify market hours or that timestamps are exactly one minute apart. Training windows likewise enforce calendar-date boundaries, not missing-candle continuity.
 - `GRUTradingBrain` is defined in `model/models.py` and shared by the model manager and GRU training module.
 - Training is orchestrated through `train_master.py`; it backs up current selected checkpoints, unloads selected models for training, then reloads the resulting checkpoint files when training ends.
@@ -57,7 +57,7 @@ The market-analysis path is:
 
 - `src/trade_ai/app.py`: initializes the model manager and runs the API in the main process.
 - `src/trade_ai/model/data_engine.py`: OpenAlgo market-history fetch, warm-up buffer, feature display, inference call.
-- `src/trade_ai/model/features.py` and `src/trade_ai/model/sequence_loader.py`: feature schema and same-session GRU windows.
+- `src/trade_ai/model/features.py` and `src/trade_ai/model/training/sequence_loader.py`: feature schema and same-session GRU windows.
 - `src/trade_ai/model/training/labels.py`: Triple Barrier target generation used by both trainers.
 - `src/trade_ai/model/training/`: LightGBM and GRU trainers plus master orchestration.
 - `src/trade_ai/model/models.py`: GRU architecture, in-memory model manager, loading, unloading, timestamped checkpoint backup, and reload.

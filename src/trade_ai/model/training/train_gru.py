@@ -14,7 +14,7 @@ from trade_ai.openalgo.openalgo_client import TYPE_OPENALGO_EXCHANGE, openalgo
 from trade_ai.util import lowercase_ohlcv_columns
 
 from ..features import compute_normalized_features
-from ..sequence_loader import (
+from .sequence_loader import (
     DEFAULT_SEQUENCE_LENGTH,
     session_dates,
     valid_window_starts,

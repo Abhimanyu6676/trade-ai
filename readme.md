@@ -54,8 +54,9 @@ trade-ai/
     │   ├── stock_metadata.py         # Ticker metadata and encoded categories
     │   ├── data_engine.py             # History fetch, feature warm-up, display, inference call
     │   ├── features.py                # Multi-timeframe model features
-    │   ├── sequence_loader.py         # Same-calendar-date GRU sequence helpers
     │   ├── training/
+    │   │   ├── sequence_loader.py    # Same-calendar-date GRU sequence helpers
+    │   │   ├── sequence_loader.md    # Session and sequence boundary notes
     │   │   ├── labels.py              # Triple Barrier labels for training
     │   │   ├── train_lgb.py           # LightGBM data preparation and trainer
     │   │   ├── train_gru.py           # GRU training and session-safe dataset
@@ -64,7 +65,6 @@ trade-ai/
     │   ├── prediction_engine.py       # Model probability blending and inference
     │   ├── data_engine.md             # Data ingestion behavior notes
     │   ├── prediction_engine.md       # Ensemble behavior notes
-    │   └── sequence_loader.md         # Session and sequence boundary notes
     ├── indicator/
     │   ├── *.py                       # Indicator implementations
     │   └── *.md                       # Indicator documentation

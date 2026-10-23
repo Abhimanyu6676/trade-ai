@@ -73,10 +73,6 @@ class ModelManager:
         with self._lock:
             self._models[model_name] = model
 
-    def recover_model_from_memory(self, model_name: ModelName) -> ModelInstance | None:
-        """Return the model instance currently retained in memory."""
-        return self.get_model(model_name)
-
     def load_models(self, model_names: tuple[ModelName, ...] = MODEL_NAMES) -> bool:
         """Load selected checkpoints into memory; warn when a checkpoint is absent."""
         loaded_any = False
