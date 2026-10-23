@@ -58,6 +58,8 @@ Run commands from the repository root.
 
    If `qwen2.5:0.5b` is missing, install it with `ollama pull qwen2.5:0.5b`.
 
+6. (When using the browser chat from a different origin) Configure `TRADE_AI_CHAT_ORIGINS` in the server environment with a comma-separated list of frontend origins. It defaults to the local Astro origins `http://localhost:4000,http://127.0.0.1:4000`.
+
 ## Dependencies Guide
 
 - `uv sync` is the standard install/update command; dependencies are declared in `pyproject.toml` and locked in `uv.lock`.
