@@ -2,40 +2,73 @@
 
 ## Server
 
-The FastAPI server is implemented in `server.py`. It runs Uvicorn on port
-`3010` in a background thread when `app.py` starts. Launching the Gradio app
-starts both services, so the API does not need a separate command.
+`app.py` loads the prediction models, then runs Uvicorn on port `3010` in the
+main process. Prediction requests fetch candles and run inference in the API
+process; there is no background server thread or prediction queue.
 
-Start it from the repository root with:
+Start the application from the repository root:
 
 ```sh
 uv run python src/trade_ai/app.py
 ```
 
-For API-only use, it can also be started directly with
-`uv run python src/trade_ai/server/server.py`.
-
-The server binds to `0.0.0.0`, so it can accept connections from outside the
-local machine when the network permits it.
-
-Browser clients are allowed by CORS from `http://localhost:3011` and
-`http://127.0.0.1:3011` by default for the Astro chat frontend. Set
-`TRADE_AI_CHAT_ORIGINS` to a comma-separated list of exact frontend origins
-for deployment, for example `https://chat.example.com`. The setting contains
-origins only (scheme, host, and optional port), not paths.
+The server binds to `0.0.0.0`. Browser origins are controlled by
+`TRADE_AI_CHAT_ORIGINS`, defaulting to `http://localhost:3011` and
+`http://127.0.0.1:3011`.
 
 ## Endpoints
 
 | Method | Path | Description | Response |
 | --- | --- | --- | --- |
-| `GET` | `/` | Basic API availability check. | `{"message": "This is 'trade-ai' API route"}` |
-| `POST` | `/api/chat` | Parse a message into a supported market action using the local parser. | `{"action": "market_analysis", "ticker": "SBIN", "days_back": 7}` |
-| `GET` | `/api/openalgo/analyser-status` | Fetch a credential-free OpenAlgo analyser status summary. | `{"available": true, "mode": "live", "analyze_mode": true, "message": "OpenAlgo analyser is online."}` |
-| `GET` | `/api/chat?message=Check%20SBIN%20for%207%20days` | Parse a message supplied as a query parameter. | `{"action": "market_analysis", "ticker": "SBIN", "days_back": 7}` |
+| `GET` | `/` | Basic API availability check (`SERVER/SERVER_STATUS`). | `{"intent":"SERVER","data":{"eventType":"SERVER_STATUS","data":{"service":"trade-ai","status":"online"},"error":null}}` |
+| `POST` | `/api/brain/predict` | Run prediction using supplied candles or fetch history (`MODEL/PREDICTION`). | `{"intent":"MODEL","data":{"eventType":"PREDICTION","data":{"action":"PREDICT","ticker":"WIPRO","exchange":"BSE","days_back":null,"interval":"1m","signal":1,"confidence":0.82,"candles_processed":420},"error":null}}` |
+| `POST` | `/api/openalgo/history` | Fetch broker history through the OpenAlgo Python client (`OPENALGO/HISTORY`). | `{"intent":"OPENALGO","data":{"eventType":"HISTORY","data":[{"timestamp":1790842500,"open":1510.5,"high":1512.0,"low":1509.0,"close":1511.5,"volume":1200,"oi":null}],"error":null}}` |
+| `GET` | `/api/openalgo/analyser-status` | Fetch OpenAlgo analyser status (`OPENALGO/ANALYSER_STATUS`). | `{"intent":"OPENALGO","data":{"eventType":"ANALYSER_STATUS","data":{"available":true,"mode":"live","analyze_mode":true,"message":"OpenAlgo analyser is online."},"error":null}}` |
 
-For POST, send `{"message": "Check SBIN for 7 days"}` in the request body.
-For GET, URL-encode the message in the `message` query parameter. Both return
-the parsed `action`, `ticker`, and `days_back` fields. `GET /api/openalgo/analyser-status` queries the configured OpenAlgo client and returns `available`, `mode`, `analyze_mode`, and a short `message`; an unreachable status service returns `available: false`. Chat routes are mounted under `/api`, and OpenAlgo routes are mounted under `/api/openalgo`.
+All endpoint responses use `UniversalServerResponse[intent, eventType,
+responseDataType, errorDataType]`. Successful responses populate
+`data.data`; errors populate `data.error` and leave `data.data` null. Endpoint
+validation errors use the same envelope and event type with HTTP 422. The
+backend event values are defined in `model/modelTypes.py`,
+`openalgo/openalgoTypes.py`, and `universalTypes.py`; keep the chat's response
+discriminators aligned with them until a shared event-types module is added.
+
+Endpoint response payload and error types, including history candle types,
+live in `serverTypes.py`, separate from model and OpenAlgo internal types.
+Errors are strings for the current endpoints. Keep the generic envelope and
+these API response contracts in `serverTypes.py` rather than duplicating
+them in each route.
+
+### OpenAlgo history
+
+The history request body contains `symbol`, `exchange`, `interval`, `start_date`,
+and `end_date`. Dates use `YYYY-MM-DD`; exchange is `NSE` or `BSE`; the
+configured broker must support the requested interval. Accepted intervals are
+`1m`, `2m`, `3m`, `4m`, `5m`, `10m`, `15m`, `30m`, `1h`, `1d`, `D`, and `W`.
+The UI's `1d` value is translated to OpenAlgo's `D` interval.
+
+Successful `data.data` is an array of candles with Unix-second `timestamp`,
+numeric OHLCV fields, and optional `oi`. OpenAlgo failures are returned in
+`data.error` as a string.
+
+Send the prediction endpoint a structured body:
+
+```json
+{
+  "ticker": "WIPRO",
+  "exchange": "BSE",
+  "days_back": 30,
+  "interval": "1m"
+}
+```
+
+`exchange` accepts `NSE` or `BSE`. The current inference pipeline accepts `1m`
+candles only. To provide candles directly, include a `candles` array of objects
+with `timestamp`, `open`, `high`, `low`, `close`, and `volume`; timestamps may
+be ISO date/time strings or Unix timestamps. Values are validated, and arrays
+are limited to 25,000 candles. If `candles` is omitted, the API fetches history
+using `days_back`. A data retrieval or inference failure is returned in
+`data.error`.
 
 ## Maintenance
 

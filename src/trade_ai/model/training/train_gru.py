@@ -8,59 +8,28 @@ import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader, Dataset
 
-from trade_ai.openalgo_client import openalgo
-from trade_ai.stock_metadata import STOCK_METADATA
+from trade_ai.model.models import GRU_MODEL_PATH, GRUTradingBrain
+from trade_ai.model.stock_metadata import STOCK_METADATA
+from trade_ai.openalgo.openalgo_client import TYPE_OPENALGO_EXCHANGE, openalgo
 from trade_ai.util import lowercase_ohlcv_columns
 
-from .features import compute_normalized_features
-from .labels import apply_triple_barrier
-from .sequence_loader import (
+from ..features import compute_normalized_features
+from ..sequence_loader import (
     DEFAULT_SEQUENCE_LENGTH,
     session_dates,
     valid_window_starts,
 )
+from .labels import apply_triple_barrier
 
 # Directory and path configurations
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 TICK_DATA_DIR = os.path.join(BASE_DIR, "tickData")
 CACHE_DIR = os.path.join(BASE_DIR, ".run_cache")
-MODEL_PATH = os.path.join(CACHE_DIR, "gru_trading_model.pth")
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
-
-
-# --- 1. PyTorch GRU Neural Network Architecture ---
-class GRUTradingBrain(nn.Module):
-    """Two-layer GRU architecture with dropout and a linear classification head."""
-
-    def __init__(
-        self,
-        input_dim: int,
-        hidden_dim: int = 64,
-        num_layers: int = 2,
-        num_classes: int = 3,
-        dropout: float = 0.2,
-    ):
-        super().__init__()
-        self.gru = nn.GRU(
-            input_size=input_dim,
-            hidden_size=hidden_dim,
-            num_layers=num_layers,
-            batch_first=True,
-            dropout=dropout if num_layers > 1 else 0.0,
-        )
-        self.fc = nn.Linear(hidden_dim, num_classes)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x shape: (batch_size, seq_len, input_dim)
-        out, _ = self.gru(x)
-        # Extract output from the last time-step of the sequence
-        last_step_out = out[:, -1, :]
-        logits = self.fc(last_step_out)
-        return logits
 
 
 # --- 2. Memory-Efficient Sliding Window Dataset ---
@@ -99,9 +68,9 @@ class SlidingWindowDataset(Dataset):
 # --- 3. Data Downloader and Ingestion Utilities ---
 def download_stock_history_in_chunks(
     ticker: str,
-    exchange: str = "NSE",
+    exchange: TYPE_OPENALGO_EXCHANGE = "NSE",
     start_date: date = date(2020, 1, 1),
-    end_date: date = date.today(),
+    end_date: date = date(2026, 7, 31),
     chunk_days: int = 30,
     retries: int = 3,
 ) -> pd.DataFrame | None:
@@ -111,8 +80,6 @@ def download_stock_history_in_chunks(
 
     while current_start < end_date:
         current_end = min(current_start + timedelta(days=chunk_days), end_date)
-        start_str = current_start.strftime("%Y-%m-%d")
-        end_str = current_end.strftime("%Y-%m-%d")
 
         success = False
         for attempt in range(retries):
@@ -121,9 +88,8 @@ def download_stock_history_in_chunks(
                     symbol=ticker,
                     exchange=exchange,
                     interval="1m",
-                    start_date=start_str,
-                    end_date=end_str,
-                    source="api",
+                    start_date=start_date,
+                    end_date=end_date,
                 )
                 if isinstance(df_chunk, pd.DataFrame) and not df_chunk.empty:
                     all_chunks.append(df_chunk)
@@ -134,8 +100,8 @@ def download_stock_history_in_chunks(
                     "[%s] Chunk retry %d failed for %s to %s: %s",
                     ticker,
                     attempt + 1,
-                    start_str,
-                    end_str,
+                    start_date,
+                    end_date,
                     e,
                 )
                 import time
@@ -146,8 +112,8 @@ def download_stock_history_in_chunks(
             logger.error(
                 "[%s] Failed chunk %s to %s after max retries.",
                 ticker,
-                start_str,
-                end_str,
+                start_date,
+                end_date,
             )
 
         current_start = current_end + timedelta(days=1)
@@ -304,17 +270,13 @@ def train_gru_model(
 
             # Save state checkpoint
             if model is not None:
-                torch.save(model.state_dict(), MODEL_PATH)
-                logger.info("💾 Checkpoint saved to: %s", MODEL_PATH)
+                torch.save(model.state_dict(), GRU_MODEL_PATH)
+                logger.info("💾 Checkpoint saved to: %s", GRU_MODEL_PATH)
         else:
             logger.error("No valid stocks processed during Epoch %d.", epoch + 1)
             break
 
     logger.info(
         "✅ GRU Training pipeline completed successfully. Weights saved to %s",
-        MODEL_PATH,
+        GRU_MODEL_PATH,
     )
-
-
-if __name__ == "__main__":
-    train_gru_model()

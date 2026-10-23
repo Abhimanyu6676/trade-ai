@@ -1,14 +1,33 @@
 """FastAPI server entry point."""
 
 import os
-from threading import Lock, Thread
+from typing import Literal
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-from trade_ai.server.chat_route import router as chat_router
-from trade_ai.server.openalgo.openalgo_route import router as analyser_status_router
+from trade_ai.server.openalgo_route import (
+    AnalyserStatusServerResponse,
+    HistoryServerResponse,
+)
+from trade_ai.server.openalgo_route import (
+    router as openalgo_router,
+)
+from trade_ai.server.predict_route import (
+    PredictionServerResponse,
+)
+from trade_ai.server.predict_route import (
+    router as predict_router,
+)
+from trade_ai.server.serverTypes import (
+    ServerStatusErrorDataType,
+    UniversalServerResponse,
+    serverDataType,
+    serverStatusResponseDataType,
+)
 
 server_app = FastAPI()
 
@@ -28,29 +47,85 @@ server_app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
-_server_thread: Thread | None = None
-_server_lock = Lock()
+server_app.include_router(predict_router, prefix="/api/brain")
+server_app.include_router(openalgo_router, prefix="/api/openalgo")
 
 
-server_app.include_router(chat_router, prefix="/api")
-server_app.include_router(analyser_status_router, prefix="/api/openalgo")
+ServerStatusResponse = UniversalServerResponse[
+    Literal["SERVER"],
+    Literal["SERVER_STATUS"],
+    serverStatusResponseDataType,
+    ServerStatusErrorDataType,
+]
 
 
-@server_app.get("/")
-async def hello_world() -> dict[str, str]:
+def _error_response(path: str, message: str) -> dict[str, object]:
+    if path == "/api/brain/predict":
+        response = PredictionServerResponse(
+            intent="MODEL",
+            data=serverDataType(eventType="PREDICTION", error=message),
+        )
+    elif path == "/api/openalgo/history":
+        response = HistoryServerResponse(
+            intent="OPENALGO",
+            data=serverDataType(eventType="HISTORY", error=message),
+        )
+    elif path == "/api/openalgo/analyser-status":
+        response = AnalyserStatusServerResponse(
+            intent="OPENALGO",
+            data=serverDataType(eventType="ANALYSER_STATUS", error=message),
+        )
+    else:
+        response = ServerStatusResponse(
+            intent="SERVER",
+            data=serverDataType(eventType="SERVER_STATUS", error=message),
+        )
+    return response.model_dump(mode="json")
+
+
+@server_app.exception_handler(RequestValidationError)
+async def handle_request_validation_error(
+    request: Request, error: RequestValidationError
+) -> JSONResponse:
+    message = "; ".join(
+        f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}"
+        for item in error.errors()
+    )
+    return JSONResponse(
+        status_code=422,
+        content=_error_response(request.url.path, message),
+    )
+
+
+@server_app.exception_handler(HTTPException)
+async def handle_http_error(request: Request, error: HTTPException) -> JSONResponse:
+    return JSONResponse(
+        status_code=error.status_code,
+        content=_error_response(request.url.path, str(error.detail)),
+        headers=error.headers,
+    )
+
+
+@server_app.exception_handler(Exception)
+async def handle_unexpected_error(request: Request, error: Exception) -> JSONResponse:
+    return JSONResponse(
+        status_code=500,
+        content=_error_response(request.url.path, str(error)),
+    )
+
+
+@server_app.get("/", response_model=ServerStatusResponse)
+async def hello_world() -> ServerStatusResponse:
     """Return a simple health check response."""
-    return {"message": "This is 'trade-ai' API route"}
+    return ServerStatusResponse(
+        intent="SERVER",
+        data=serverDataType(
+            eventType="SERVER_STATUS",
+            data=serverStatusResponseDataType(service="trade-ai", status="online"),
+        ),
+    )
 
 
-def start_server() -> Thread:
-    """Start Uvicorn on port 3010 in a background thread if not already running."""
-    global _server_thread
-
-    with _server_lock:
-        if _server_thread is not None and _server_thread.is_alive():
-            return _server_thread
-
-        server = uvicorn.Server(uvicorn.Config(server_app, host="0.0.0.0", port=3010))
-        _server_thread = Thread(target=server.run, name="trade-ai-api", daemon=True)
-        _server_thread.start()
-        return _server_thread
+def run_server() -> None:
+    """Run Uvicorn in the current process until shutdown."""
+    uvicorn.run(server_app, host="0.0.0.0", port=3010)

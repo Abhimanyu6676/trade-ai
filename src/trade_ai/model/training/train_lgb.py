@@ -6,18 +6,18 @@ import lightgbm as lgb
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from trade_ai.openalgo_client import openalgo
-from trade_ai.stock_metadata import STOCK_METADATA
+from trade_ai.model.models import LGB_MODEL_PATH
+from trade_ai.model.stock_metadata import STOCK_METADATA
+from trade_ai.openalgo.openalgo_client import TYPE_OPENALGO_EXCHANGE, openalgo
 from trade_ai.util import lowercase_ohlcv_columns
 
-from .features import compute_normalized_features
+from ..features import compute_normalized_features
 from .labels import apply_triple_barrier
 
 # Configure paths and logging
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 TICK_DATA_DIR = os.path.join(BASE_DIR, "tickData")
 CACHE_DIR = os.path.join(BASE_DIR, ".run_cache")
-MODEL_PATH = os.path.join(CACHE_DIR, "lgb_trading_model.txt")
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -27,9 +27,9 @@ logging.basicConfig(
 
 def download_stock_history_in_chunks(
     ticker: str,
-    exchange: str = "NSE",
+    exchange: TYPE_OPENALGO_EXCHANGE = "NSE",
     start_date: date = date(2020, 1, 1),
-    end_date: date = date.today(),
+    end_date: date = date(2026, 7, 31),
     chunk_days: int = 30,
     retries: int = 3,
 ) -> pd.DataFrame | None:
@@ -49,8 +49,6 @@ def download_stock_history_in_chunks(
 
     while current_start < end_date:
         current_end = min(current_start + timedelta(days=chunk_days), end_date)
-        start_str = current_start.strftime("%Y-%m-%d")
-        end_str = current_end.strftime("%Y-%m-%d")
 
         success = False
         for attempt in range(retries):
@@ -59,9 +57,8 @@ def download_stock_history_in_chunks(
                     symbol=ticker,
                     exchange=exchange,
                     interval="1m",
-                    start_date=start_str,
-                    end_date=end_str,
-                    source="api",
+                    start_date=start_date,
+                    end_date=end_date,
                 )
                 if isinstance(df_chunk, pd.DataFrame) and not df_chunk.empty:
                     all_chunks.append(df_chunk)
@@ -72,8 +69,8 @@ def download_stock_history_in_chunks(
                     "[%s] Retry %d failed for range %s to %s: %s",
                     ticker,
                     attempt + 1,
-                    start_str,
-                    end_str,
+                    start_date,
+                    end_date,
                     e,
                 )
                 import time
@@ -84,8 +81,8 @@ def download_stock_history_in_chunks(
             logger.error(
                 "[%s] Failed chunk %s to %s after %d attempts.",
                 ticker,
-                start_str,
-                end_str,
+                start_date,
+                end_date,
                 retries,
             )
 
@@ -236,10 +233,8 @@ def train_lightgbm_model():
     )
 
     # Save trained model to disk
-    model.save_model(MODEL_PATH)
-    logger.info("✅ LightGBM training complete! Model weights saved to: %s", MODEL_PATH)
+    model.save_model(LGB_MODEL_PATH)
+    logger.info(
+        "✅ LightGBM training complete! Model weights saved to: %s", LGB_MODEL_PATH
+    )
     return model
-
-
-if __name__ == "__main__":
-    train_lightgbm_model()

@@ -1,2 +1,4 @@
 def main() -> None:
-    print("Hello from trade-ai!")
+    from trade_ai.app import main as run_app
+
+    run_app()

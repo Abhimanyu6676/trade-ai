@@ -1,6 +1,6 @@
 # Session-Safe GRU Sequences
 
-Implementation: `sequence_loader.py`, used by `train_gru.py` and `prediction_engine.py`.
+Implementation: `sequence_loader.py`, used by `training/train_gru.py` and `prediction_engine.py`.
 
 The shared `DEFAULT_SEQUENCE_LENGTH` is 30 candles and is used by both GRU training and app inference.
 

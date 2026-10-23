@@ -9,7 +9,7 @@ from trade_ai.indicator import (
     calculate_liquidity_sweep,
     calculate_rsi,
 )
-from trade_ai.stock_metadata import (
+from trade_ai.model.stock_metadata import (
     METADATA_FEATURE_COLUMNS,
     encode_categorical_metadata,
 )
