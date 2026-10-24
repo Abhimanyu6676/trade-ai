@@ -13,7 +13,11 @@ from trade_ai.model.stock_metadata import STOCK_METADATA
 from trade_ai.openalgo.openalgo_client import TYPE_OPENALGO_EXCHANGE, openalgo
 from trade_ai.util import lowercase_ohlcv_columns
 
-from ..features import compute_normalized_features
+from ..features import (
+    FEATURE_SCHEMA_VERSION,
+    MODEL_INPUT_COLUMNS,
+    compute_normalized_features,
+)
 from .labels import apply_triple_barrier
 from .sequence_loader import (
     DEFAULT_SEQUENCE_LENGTH,
@@ -195,9 +199,7 @@ def train_gru_model(
             # Keep feature rows with NaN targets as sequence context (for example,
             # 09:30-09:59 candles can inform the first labeled 10:00 sample).
             df_clean = df_feat.dropna(subset=["timestamp"]).copy()
-            feature_cols = [
-                col for col in df_clean.columns if col not in ["timestamp", "target"]
-            ]
+            feature_cols = list(MODEL_INPUT_COLUMNS)
             X_np = df_clean[feature_cols].to_numpy(dtype=np.float32)
             y_np = pd.to_numeric(df_clean["target"], errors="coerce").to_numpy(
                 dtype=np.float32
@@ -270,7 +272,14 @@ def train_gru_model(
 
             # Save state checkpoint
             if model is not None:
-                torch.save(model.state_dict(), GRU_MODEL_PATH)
+                torch.save(
+                    {
+                        "feature_schema_version": FEATURE_SCHEMA_VERSION,
+                        "feature_columns": feature_cols,
+                        "state_dict": model.state_dict(),
+                    },
+                    GRU_MODEL_PATH,
+                )
                 logger.info("💾 Checkpoint saved to: %s", GRU_MODEL_PATH)
         else:
             logger.error("No valid stocks processed during Epoch %d.", epoch + 1)

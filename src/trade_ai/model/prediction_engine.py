@@ -9,7 +9,7 @@ import torch
 
 from trade_ai.util import merge_ohlcv_history
 
-from .features import compute_normalized_features
+from .features import MODEL_INPUT_COLUMNS, compute_normalized_features
 from .models import GRUTradingBrain, get_model_manager
 from .training.sequence_loader import DEFAULT_SEQUENCE_LENGTH, latest_session_sequence
 
@@ -34,9 +34,8 @@ def predict(
     df_lgb_feat = compute_normalized_features(raw_df, ticker, model_type="lgb")
     df_gru_feat = compute_normalized_features(raw_df, ticker, model_type="gru")
 
-    exclude_cols = ["timestamp", "target"]
-    lgb_feature_cols = [col for col in df_lgb_feat.columns if col not in exclude_cols]
-    gru_feature_cols = [col for col in df_gru_feat.columns if col not in exclude_cols]
+    lgb_feature_cols = list(MODEL_INPUT_COLUMNS)
+    gru_feature_cols = list(MODEL_INPUT_COLUMNS)
 
     if df_lgb_feat.empty:
         return 0, 0.0, {"error": "Insufficient data after feature warmup"}

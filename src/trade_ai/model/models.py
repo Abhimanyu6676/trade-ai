@@ -1,5 +1,6 @@
 """Own the in-memory LightGBM and GRU model instances and their lifecycle."""
 
+import json
 import logging
 import os
 import shutil
@@ -10,11 +11,13 @@ import lightgbm as lgb
 import torch
 from torch import nn
 
+from trade_ai.model.features import FEATURE_SCHEMA_VERSION, MODEL_INPUT_COLUMNS
 from trade_ai.model.modelTypes import MODEL_NAMES, ModelName
 
 BASE_DIR = os.path.dirname(__file__)
 CACHE_DIR = os.path.join(BASE_DIR, ".run_cache")
 LGB_MODEL_PATH = os.path.join(CACHE_DIR, "lgb_trading_model.txt")
+LGB_MODEL_SCHEMA_PATH = f"{LGB_MODEL_PATH}.schema.json"
 GRU_MODEL_PATH = os.path.join(CACHE_DIR, "gru_trading_model.pth")
 
 logger = logging.getLogger(__name__)
@@ -80,7 +83,16 @@ class ModelManager:
                             )
                             self._models[model_name] = None
                             continue
+                        with open(
+                            LGB_MODEL_SCHEMA_PATH, encoding="utf-8"
+                        ) as schema_file:
+                            checkpoint = json.load(schema_file)
+                        self._validate_feature_schema(checkpoint, model_name)
                         model = lgb.Booster(model_file=LGB_MODEL_PATH)
+                        if tuple(model.feature_name()) != MODEL_INPUT_COLUMNS:
+                            raise ValueError(
+                                "LightGBM feature names do not match the checkpoint schema"
+                            )
                     else:
                         if not os.path.isfile(GRU_MODEL_PATH):
                             logger.warning(
@@ -89,15 +101,23 @@ class ModelManager:
                             )
                             self._models[model_name] = None
                             continue
-                        state_dict = torch.load(
+                        checkpoint = torch.load(
                             GRU_MODEL_PATH,
                             map_location=self.device,
                             weights_only=True,
                         )
+                        self._validate_feature_schema(checkpoint, model_name)
+                        state_dict = checkpoint.get("state_dict")
+                        if not isinstance(state_dict, dict):
+                            raise ValueError("GRU checkpoint is missing its state_dict")
                         input_weights = state_dict.get("gru.weight_ih_l0")
                         if input_weights is None:
                             raise ValueError(
                                 "GRU checkpoint is missing gru.weight_ih_l0"
+                            )
+                        if int(input_weights.shape[1]) != len(MODEL_INPUT_COLUMNS):
+                            raise ValueError(
+                                "GRU input width does not match the checkpoint feature schema"
                             )
                         model = GRUTradingBrain(
                             input_dim=int(input_weights.shape[1])
@@ -112,6 +132,21 @@ class ModelManager:
                     self._models[model_name] = None
                     logger.exception("Failed to load %s model.", model_name.upper())
         return loaded_any
+
+    @staticmethod
+    def _validate_feature_schema(checkpoint: object, model_name: ModelName) -> None:
+        if not isinstance(checkpoint, dict):
+            raise ValueError(
+                f"{model_name.upper()} checkpoint must contain schema metadata"
+            )
+        if checkpoint.get("feature_schema_version") != FEATURE_SCHEMA_VERSION:
+            raise ValueError(
+                f"{model_name.upper()} checkpoint feature schema version is incompatible"
+            )
+        if tuple(checkpoint.get("feature_columns", ())) != MODEL_INPUT_COLUMNS:
+            raise ValueError(
+                f"{model_name.upper()} checkpoint feature columns do not match this code"
+            )
 
     def unload_models(self, model_names: tuple[ModelName, ...] = MODEL_NAMES) -> None:
         """Release selected model references from memory."""
@@ -129,19 +164,24 @@ class ModelManager:
     def backup_current_models(
         self, model_names: tuple[ModelName, ...] = MODEL_NAMES
     ) -> list[str]:
-        """Back up loaded model files using a timestamped filename."""
+        """Back up existing selected model files using timestamped filenames."""
         os.makedirs(CACHE_DIR, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         backup_paths: list[str] = []
         with self._lock:
             for model_name in model_names:
                 source_path = self._model_path(model_name)
-                if self._models[model_name] is None or not os.path.isfile(source_path):
+                if not os.path.isfile(source_path):
                     continue
                 stem, extension = os.path.splitext(source_path)
                 backup_path = f"{stem}_backup_{timestamp}{extension}"
                 shutil.copy2(source_path, backup_path)
                 backup_paths.append(backup_path)
+                if model_name == "lgb" and os.path.isfile(LGB_MODEL_SCHEMA_PATH):
+                    shutil.copy2(
+                        LGB_MODEL_SCHEMA_PATH,
+                        f"{backup_path}.schema.json",
+                    )
                 logger.info("Backed up %s model to %s", model_name.upper(), backup_path)
         return backup_paths
 

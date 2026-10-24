@@ -6,8 +6,8 @@ trains LightGBM first and GRU second.
 ## Steps
 
 1. **Select models.** Resolve the requested selection to the model names to train.
-2. **Back up checkpoints.** Copy selected, loaded model files to timestamped
-   backups. Missing or unloaded models are skipped.
+2. **Back up checkpoints.** Copy existing selected model files to timestamped
+   backups, including LightGBM schema manifests. Missing files are skipped.
 3. **Unload selected models.** Clear their in-memory manager references before
    training.
 4. **Prepare and train LightGBM** when selected. For each ticker, load cached
@@ -19,13 +19,18 @@ trains LightGBM first and GRU second.
    history, compute features and labels, and build same-session sequences. Rows
    with missing targets may be sequence context, but each sequence must end on
    a labeled row. Train the two-layer GRU in batches; save its state after each
-   successful epoch.
-6. **Reload selected models.** A `finally` block reloads the selected models
-   from their checkpoint paths, including when training raises an error.
+   successful epoch. The checkpoint includes the feature schema version and
+   ordered input-column names. Both models use the 55 engineered inputs only;
+   raw OHLCV columns remain available for feature calculation but are excluded
+   from model inputs.
+6. **Reload selected models.** A `finally` block validates checkpoint schema
+   metadata and reloads selected models, including when training raises an
+   error. A schema mismatch leaves that model unloaded and requires retraining.
 
 The default GRU run uses 10 epochs, 30 candles per sequence, and batches of 256.
 Checkpoint files are under `src/trade_ai/model/.run_cache/`:
-`lgb_trading_model.txt` and `gru_trading_model.pth`.
+`lgb_trading_model.txt` with its `.schema.json` manifest, and
+`gru_trading_model.pth` with schema metadata in the checkpoint.
 
 Run training in the foreground from the repository root with:
 

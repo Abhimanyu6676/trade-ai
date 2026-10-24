@@ -17,6 +17,8 @@ from trade_ai.util import lowercase_ohlcv_columns, resample_ohlcv
 
 DEFAULT_TIMEFRAMES = ("1m", "3m", "5m", "15m", "30m", "1h")
 DEFAULT_EMA_SPANS = (9, 21, 50)
+# Increment when the model input feature names, order, or meanings change.
+FEATURE_SCHEMA_VERSION = 2
 
 
 def _add_multi_timeframe_features(
@@ -125,3 +127,7 @@ FEATURE_COLUMNS = [
     ],
     *METADATA_FEATURE_COLUMNS,
 ]
+
+# Keep training and inference input order fixed, independent of source column order.
+# Raw OHLCV remains in the frame for feature calculations, but is not model input.
+MODEL_INPUT_COLUMNS = tuple(FEATURE_COLUMNS)

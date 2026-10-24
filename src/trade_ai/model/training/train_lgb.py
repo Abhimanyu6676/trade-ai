@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from datetime import date, timedelta
@@ -6,12 +7,16 @@ import lightgbm as lgb
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from trade_ai.model.models import LGB_MODEL_PATH
+from trade_ai.model.models import LGB_MODEL_PATH, LGB_MODEL_SCHEMA_PATH
 from trade_ai.model.stock_metadata import STOCK_METADATA
 from trade_ai.openalgo.openalgo_client import TYPE_OPENALGO_EXCHANGE, openalgo
 from trade_ai.util import lowercase_ohlcv_columns
 
-from ..features import compute_normalized_features
+from ..features import (
+    FEATURE_SCHEMA_VERSION,
+    MODEL_INPUT_COLUMNS,
+    compute_normalized_features,
+)
 from .labels import apply_triple_barrier
 
 # Configure paths and logging
@@ -163,10 +168,8 @@ def prepare_training_data() -> tuple[pd.DataFrame, pd.Series]:
             )
             continue
 
-        # Separate features (X) and target (y)
-        # Exclude non-feature metadata columns like timestamp
-        exclude_cols = ["timestamp", "target"]
-        feature_cols = [col for col in df_clean.columns if col not in exclude_cols]
+        # Select the canonical feature schema and target separately.
+        feature_cols = list(MODEL_INPUT_COLUMNS)
 
         all_features.append(df_clean[feature_cols])
         # Remap Triple Barrier classes from {-1, 0, 1} to {0, 1, 2} for LightGBM multiclass objective
@@ -234,6 +237,15 @@ def train_lightgbm_model():
 
     # Save trained model to disk
     model.save_model(LGB_MODEL_PATH)
+    with open(LGB_MODEL_SCHEMA_PATH, "w", encoding="utf-8") as schema_file:
+        json.dump(
+            {
+                "feature_schema_version": FEATURE_SCHEMA_VERSION,
+                "feature_columns": list(MODEL_INPUT_COLUMNS),
+            },
+            schema_file,
+            indent=2,
+        )
     logger.info(
         "✅ LightGBM training complete! Model weights saved to: %s", LGB_MODEL_PATH
     )
