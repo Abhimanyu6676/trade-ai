@@ -8,7 +8,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field, field_validator
 
 from trade_ai.model.data_engine import fetch_and_clean_candles, predict_from_candles
-from trade_ai.openalgo.openalgoTypes import OhlcvCandle
+from trade_ai.openalgo.openalgoTypes import TYPE_OPENALGO_EXCHANGE, OhlcvCandle
 from trade_ai.server.serverTypes import (
     UniversalServerResponse,
     serverDataType,
@@ -19,7 +19,7 @@ router = APIRouter()
 
 class PredictionRequest(BaseModel):
     ticker: str = Field(min_length=1, max_length=32)
-    exchange: Literal["NSE", "BSE"] = "NSE"
+    exchange: TYPE_OPENALGO_EXCHANGE = "NSE"
     days_back: int = Field(default=7, ge=1, le=3650)
     interval: Literal["1m"] = "1m"
     candles: list[OhlcvCandle] | None = Field(

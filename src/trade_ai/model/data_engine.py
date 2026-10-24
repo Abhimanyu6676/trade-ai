@@ -102,9 +102,6 @@ def _process_fetched_candles(
             "high",
             "low",
             "close",
-            "Return_1m",
-            "ATR_Pct_5m",
-            "Macro_Trend_Gate",
             "volume",
         ]
         if col in processed_df.columns
