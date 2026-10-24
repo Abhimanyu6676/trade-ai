@@ -16,9 +16,13 @@ from trade_ai.model.modelTypes import MODEL_NAMES, ModelName
 
 BASE_DIR = os.path.dirname(__file__)
 CACHE_DIR = os.path.join(BASE_DIR, ".run_cache")
-LGB_MODEL_PATH = os.path.join(CACHE_DIR, "lgb_trading_model.txt")
+LGB_MODEL_PATH = os.path.join(
+    CACHE_DIR, f"lgb_trading_model_v{FEATURE_SCHEMA_VERSION}.txt"
+)
 LGB_MODEL_SCHEMA_PATH = f"{LGB_MODEL_PATH}.schema.json"
-GRU_MODEL_PATH = os.path.join(CACHE_DIR, "gru_trading_model.pth")
+GRU_MODEL_PATH = os.path.join(
+    CACHE_DIR, f"gru_trading_model_v{FEATURE_SCHEMA_VERSION}.pth"
+)
 
 logger = logging.getLogger(__name__)
 

@@ -29,8 +29,9 @@ trains LightGBM first and GRU second.
 
 The default GRU run uses 10 epochs, 30 candles per sequence, and batches of 256.
 Checkpoint files are under `src/trade_ai/model/.run_cache/`:
-`lgb_trading_model.txt` with its `.schema.json` manifest, and
-`gru_trading_model.pth` with schema metadata in the checkpoint.
+`lgb_trading_model_v{FEATURE_SCHEMA_VERSION}.txt` with its `.schema.json`
+manifest, and `gru_trading_model_v{FEATURE_SCHEMA_VERSION}.pth` with schema
+metadata in the checkpoint. The current version is 2.
 
 Run training in the foreground from the repository root with:
 

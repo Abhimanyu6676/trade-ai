@@ -163,6 +163,7 @@ def train_gru_model(
     logger.info("🚀 Initializing GRU Training Pipeline on device: %s", device)
 
     tickers = list(STOCK_METADATA.keys())
+    feature_cols = list(MODEL_INPUT_COLUMNS)
     model = None
     optimizer = None
     criterion = nn.CrossEntropyLoss()
@@ -199,7 +200,6 @@ def train_gru_model(
             # Keep feature rows with NaN targets as sequence context (for example,
             # 09:30-09:59 candles can inform the first labeled 10:00 sample).
             df_clean = df_feat.dropna(subset=["timestamp"]).copy()
-            feature_cols = list(MODEL_INPUT_COLUMNS)
             X_np = df_clean[feature_cols].to_numpy(dtype=np.float32)
             y_np = pd.to_numeric(df_clean["target"], errors="coerce").to_numpy(
                 dtype=np.float32
