@@ -36,6 +36,7 @@ def run_training(training_selection: TrainingSelection = "both") -> bool:
     model_manager.backup_current_models(selected_models)
     model_manager.unload_models(selected_models)
 
+    training_succeeded = False
     try:
         if training_selection in ("lgb", "both"):
             logger.info("Starting LightGBM training.")
@@ -47,12 +48,20 @@ def run_training(training_selection: TrainingSelection = "both") -> bool:
             train_gru_model(epochs=10)
             logger.info("GRU training completed.")
 
+        training_succeeded = True
         return True
     except Exception:
         logger.exception("Training failed for selection %s.", training_selection)
         raise
     finally:
-        model_manager.reload_models(selected_models)
+        if training_succeeded:
+            model_manager.reload_models(selected_models)
+        else:
+            logger.warning(
+                "Skipping model reload after failed %s training; selected models "
+                "will remain unloaded until reloaded explicitly.",
+                training_selection,
+            )
 
 
 def run_full_training_pipeline() -> bool:

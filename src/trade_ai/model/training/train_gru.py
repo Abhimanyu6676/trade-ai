@@ -185,6 +185,7 @@ def train_gru_model(
     feature_cols = list(GRU_MODEL_INPUT_COLUMNS)
     model = None
     optimizer = None
+    checkpoint_saved = False
     criterion = nn.CrossEntropyLoss()
 
     for epoch in range(epochs):
@@ -299,10 +300,16 @@ def train_gru_model(
                     },
                     GRU_MODEL_PATH,
                 )
+                checkpoint_saved = True
                 logger.info("💾 Checkpoint saved to: %s", GRU_MODEL_PATH)
         else:
             logger.error("No valid stocks processed during Epoch %d.", epoch + 1)
             break
+
+    if not checkpoint_saved:
+        raise RuntimeError(
+            "GRU training produced no checkpoint; no valid stocks were trained."
+        )
 
     logger.info(
         "✅ GRU Training pipeline completed successfully. Weights saved to %s",

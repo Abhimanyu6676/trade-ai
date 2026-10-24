@@ -29,10 +29,14 @@ trains LightGBM first and GRU second.
    schema version and ordered input-column names. Each trainer selects its
    model-specific schema; GRU excludes static metadata, LightGBM includes it,
    and both exclude raw OHLCV from model inputs. See `../features.md` for counts
-   and full input lists.
-6. **Reload selected models.** A `finally` block validates checkpoint schema
-   metadata and reloads selected models, including when training raises an
-   error. A schema mismatch leaves that model unloaded and requires retraining.
+   and full input lists. GRU training raises an error if no epoch saves a
+   checkpoint because no valid stocks were trained.
+6. **Reload selected models after success.** The `finally` block reloads the
+   selected models only if every selected trainer returned successfully. If a
+   trainer raises an error, reload is skipped and the selected models remain
+   unloaded in the current process until they are explicitly reloaded or the app
+   restarts. A schema mismatch during a successful run still leaves that model
+   unloaded and requires retraining.
 
 The default GRU run uses 10 epochs, 30 candles per sequence, and batches of 256.
 Checkpoint files are under `src/trade_ai/model/.run_cache/`:

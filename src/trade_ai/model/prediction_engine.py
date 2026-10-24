@@ -62,9 +62,11 @@ def predict(
 
     if isinstance(gru_model, GRUTradingBrain) and sequence_features is not None:
         with torch.inference_mode():
-            x_tensor = torch.tensor(sequence_features, dtype=torch.float32).unsqueeze(
-                0
-            ).to(model_manager.device)
+            x_tensor = (
+                torch.tensor(sequence_features, dtype=torch.float32)
+                .unsqueeze(0)
+                .to(model_manager.device)
+            )
             logits = gru_model(x_tensor)
             gru_probs = torch.softmax(logits, dim=1).cpu().numpy()[0]
     elif isinstance(gru_model, GRUTradingBrain):
