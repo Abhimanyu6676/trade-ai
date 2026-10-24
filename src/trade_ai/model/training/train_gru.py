@@ -14,12 +14,12 @@ from trade_ai.openalgo.openalgo_client import TYPE_OPENALGO_EXCHANGE, openalgo
 from trade_ai.util import lowercase_ohlcv_columns
 
 from ..features import compute_normalized_features
+from .labels import apply_triple_barrier
 from .sequence_loader import (
     DEFAULT_SEQUENCE_LENGTH,
     session_dates,
     valid_window_starts,
 )
-from .labels import apply_triple_barrier
 
 # Directory and path configurations
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

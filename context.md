@@ -32,8 +32,8 @@ The market-analysis path is:
 - `model/training/train_lgb.py` loads each ticker's cached CSV or downloads history from 2020 in 30-calendar-day API chunks (three retries per chunk). It calculates LGB features, labels rows, maps classes to `0/1/2`, concatenates per-ticker data, and trains up to 500 LightGBM rounds with early stopping. Its 80/20 split is unshuffled after ticker-wise concatenation; it is not a globally interleaved time split.
 - `model/training/train_gru.py` trains a two-layer, 64-hidden-unit, three-class GRU. Defaults are 10 epochs, 30 candles per sequence, batch size 256, and Adam. Sliding windows must remain on one calendar date; unlabeled feature rows can serve as input context, but a window's final row must have a label. The DataLoader shuffles the valid windows and drops incomplete batches.
 - Both trainers use `src/trade_ai/tickData/<TICKER>_history.csv` when it exists. Existing cache files are read as-is; they are not automatically refreshed. If missing, the trainers download and cache history.
-- `model/training/train_master.py` accepts `gru`, `lgb`, or `both` (default). It backs up loaded checkpoint files to timestamped copies, unloads the selected models, runs their training functions, then reloads the selected checkpoints. Run it with `uv run python -m trade_ai.model.training.train_master [gru|lgb|both]`.
-- Model files are written under `src/trade_ai/.run_cache/`: `lgb_trading_model.txt` and `gru_trading_model.pth`.
+- `model/training/train_master.py` accepts `gru`, `lgb`, or `both` (default). It backs up loaded checkpoint files to timestamped copies, unloads the selected models, runs their training functions, then reloads the selected checkpoints. Run it with `uv run python -m trade_ai.model.training.train_master [gru|lgb|both]`; see `model/training/training.md` for the step-by-step lifecycle.
+- Model files are written under `src/trade_ai/model/.run_cache/`: `lgb_trading_model.txt` and `gru_trading_model.pth`.
 
 ## Prediction Behavior and Known Limits
 
@@ -59,7 +59,7 @@ The market-analysis path is:
 - `src/trade_ai/model/data_engine.py`: OpenAlgo market-history fetch, warm-up buffer, feature display, inference call.
 - `src/trade_ai/model/features.py` and `src/trade_ai/model/training/sequence_loader.py`: feature schema and same-session GRU windows.
 - `src/trade_ai/model/training/labels.py`: Triple Barrier target generation used by both trainers.
-- `src/trade_ai/model/training/`: LightGBM and GRU trainers plus master orchestration.
+- `src/trade_ai/model/training/`: LightGBM and GRU trainers, master orchestration, and `training.md` lifecycle notes.
 - `src/trade_ai/model/models.py`: GRU architecture, in-memory model manager, loading, unloading, timestamped checkpoint backup, and reload.
 - `src/trade_ai/model/prediction_engine.py`: read-only ensemble inference using model instances from `models.py`.
 - `src/trade_ai/openalgo/openalgo_client.py`, `src/trade_ai/openalgo/helper.py`, `src/trade_ai/util.py`, `src/trade_ai/model/stock_metadata.py`: shared client, OpenAlgo response conversion, candle utilities, metadata inputs.
