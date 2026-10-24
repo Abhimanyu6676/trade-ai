@@ -1,7 +1,8 @@
 """FastAPI server entry point."""
 
 import os
-from typing import Literal
+from dataclasses import dataclass
+from typing import Any, Literal
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -23,10 +24,8 @@ from trade_ai.server.predict_route import (
     router as predict_router,
 )
 from trade_ai.server.serverTypes import (
-    ServerStatusErrorDataType,
     UniversalServerResponse,
     serverDataType,
-    serverStatusResponseDataType,
 )
 
 server_app = FastAPI()
@@ -51,15 +50,7 @@ server_app.include_router(predict_router, prefix="/api/brain")
 server_app.include_router(openalgo_router, prefix="/api/openalgo")
 
 
-ServerStatusResponse = UniversalServerResponse[
-    Literal["SERVER"],
-    Literal["SERVER_STATUS"],
-    serverStatusResponseDataType,
-    ServerStatusErrorDataType,
-]
-
-
-def _error_response(path: str, message: str) -> dict[str, object]:
+def _error_response(path: str, message: str) -> Any:
     if path == "/api/brain/predict":
         response = PredictionServerResponse(
             intent="MODEL",
@@ -80,7 +71,7 @@ def _error_response(path: str, message: str) -> dict[str, object]:
             intent="SERVER",
             data=serverDataType(eventType="SERVER_STATUS", error=message),
         )
-    return response.model_dump(mode="json")
+    return response
 
 
 @server_app.exception_handler(RequestValidationError)
@@ -112,6 +103,21 @@ async def handle_unexpected_error(request: Request, error: Exception) -> JSONRes
         status_code=500,
         content=_error_response(request.url.path, str(error)),
     )
+
+
+# Server status endpoint response and error types
+@dataclass
+class serverStatusResponseDataType:
+    service: str
+    status: Literal["online"]
+
+
+ServerStatusResponse = UniversalServerResponse[
+    Literal["SERVER"],
+    Literal["SERVER_STATUS"],
+    serverStatusResponseDataType,
+    str,
+]
 
 
 @server_app.get("/", response_model=ServerStatusResponse)

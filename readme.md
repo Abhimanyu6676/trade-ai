@@ -48,7 +48,7 @@ trade-ai/
 └── src/trade_ai/
     ├── __init__.py                   # Package entry point
     ├── app.py                        # Loads prediction models and starts the API
-    ├── openalgo/                     # Shared OpenAlgo SDK client and types
+    ├── openalgo/                     # OpenAlgo client, types, and conversion helpers
     ├── util.py                       # OHLCV ordering, merge, and resampling helpers
     ├── model/
     │   ├── stock_metadata.py         # Ticker metadata and encoded categories

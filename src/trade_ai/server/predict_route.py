@@ -1,55 +1,19 @@
 """Structured prediction endpoint; inference is handled by the main app thread."""
 
-import math
-from datetime import datetime
+from dataclasses import dataclass
 from typing import Literal, cast
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 from trade_ai.model.data_engine import fetch_and_clean_candles, predict_from_candles
+from trade_ai.openalgo.openalgoTypes import OhlcvCandle
 from trade_ai.server.serverTypes import (
-    PredictionErrorDataType,
-    PredictionResponseDataType,
     UniversalServerResponse,
     serverDataType,
 )
 
 router = APIRouter()
-
-
-class OhlcvCandle(BaseModel):
-    timestamp: str | int | float
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: float
-
-    @field_validator("timestamp")
-    @classmethod
-    def validate_timestamp(cls, value: str | float) -> str | int | float:
-        if isinstance(value, str):
-            try:
-                datetime.fromisoformat(value.replace("Z", "+00:00"))
-            except ValueError as error:
-                raise ValueError(
-                    "timestamp must be an ISO date/time or Unix timestamp"
-                ) from error
-        elif not math.isfinite(value) or value <= 0:
-            raise ValueError("timestamp must be a positive Unix timestamp")
-        return value
-
-    @model_validator(mode="after")
-    def validate_candle(self) -> OhlcvCandle:
-        values = (self.open, self.high, self.low, self.close, self.volume)
-        if not all(math.isfinite(value) for value in values):
-            raise ValueError("OHLCV values must be finite numbers")
-        if self.volume < 0 or self.high < max(self.open, self.close, self.low):
-            raise ValueError("Candle high or volume is invalid")
-        if self.low > min(self.open, self.close, self.high):
-            raise ValueError("Candle low is invalid")
-        return self
 
 
 class PredictionRequest(BaseModel):
@@ -70,12 +34,23 @@ class PredictionRequest(BaseModel):
         return ticker
 
 
-PredictionResponse = PredictionResponseDataType
+# Prediction endpoint response and error types
+@dataclass
+class PredictionResponseDataType:
+    ticker: str
+    exchange: Literal["NSE", "BSE"]
+    days_back: int | None
+    interval: Literal["1m"]
+    signal: Literal[-1, 0, 1]
+    confidence: float
+    candles_processed: int
+
+
 PredictionServerResponse = UniversalServerResponse[
     Literal["MODEL"],
     Literal["PREDICTION"],
     PredictionResponseDataType,
-    PredictionErrorDataType,
+    str,
 ]
 
 
@@ -107,8 +82,7 @@ async def predict(request: PredictionRequest) -> PredictionServerResponse:
             intent="MODEL",
             data=serverDataType(
                 eventType="PREDICTION",
-                data=PredictionResponse(
-                    action="PREDICT",
+                data=PredictionResponseDataType(
                     ticker=ticker,
                     exchange=request.exchange,
                     days_back=days_back,

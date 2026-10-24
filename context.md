@@ -1,6 +1,6 @@
 # trade-ai Current Context
 
-Last reviewed: 2026-10-23.
+Last reviewed: 2026-10-24.
 
 ## Purpose and Runtime Flow
 
@@ -13,7 +13,7 @@ The market-analysis path is:
 3. `model/features.py` builds the multi-timeframe features. The data engine uses this result for the display grid and passes the raw OHLCV frame to inference.
 4. `model/prediction_engine.py` engineers model-specific features, gets probabilities from the loaded model instances, and blends the probabilities when both models are ready. `model/models.py` owns the in-memory model instances and all loading, unloading, backup, and reload operations.
 
-`POST /api/brain/predict` accepts structured ticker, exchange, lookback, and interval fields. The API process fetches candles and runs inference directly. The current engine supports `1m` source candles only. `POST /api/openalgo/history` fetches broker history through the shared OpenAlgo client; `GET /api/openalgo/analyser-status` queries analyser availability. All endpoints return `UniversalServerResponse` with an intent and output `eventType`; success data is stored in `data.data` and errors in `data.error`. Endpoint payload and error types live in `server/serverTypes.py`; `model/modelTypes.py` and `openalgo/openalgoTypes.py` contain internal domain/request event literals, while `universalTypes.py` contains global intent/event types. Starting `app.py` loads the prediction models and runs FastAPI on port 3010 in the main process. The server allows browser requests from origins listed in `TRADE_AI_CHAT_ORIGINS`, defaulting to `http://localhost:3011,http://127.0.0.1:3011`.
+`POST /api/brain/predict` accepts structured ticker, exchange, lookback, and interval fields; supplied candle arrays are validated by `OhlcvCandle` in `openalgo/openalgoTypes.py`. The API process fetches candles and runs inference directly. The current engine supports `1m` source candles only. `POST /api/openalgo/history` fetches broker history through the shared OpenAlgo client and returns symbol, exchange, interval, and candles together in `data.data`; `GET /api/openalgo/analyser-status` queries analyser availability. All endpoints return `UniversalServerResponse` with an intent and output `eventType`; success data is stored in `data.data` and errors in `data.error`. `server/serverTypes.py` owns the generic response envelope, module-related domain types belong in their module's `*Types.py` file, and route-specific response contracts are defined with their routes. `model/modelTypes.py` and `openalgo/openalgoTypes.py` contain domain types and request/event literals, while `universalTypes.py` contains global intent/event types. Starting `app.py` loads the prediction models and runs FastAPI on port 3010 in the main process. The server allows browser requests from origins listed in `TRADE_AI_CHAT_ORIGINS`, defaulting to `http://localhost:3011,http://127.0.0.1:3011`.
 
 ## Data and Feature Contract
 
@@ -62,12 +62,12 @@ The market-analysis path is:
 - `src/trade_ai/model/training/`: LightGBM and GRU trainers plus master orchestration.
 - `src/trade_ai/model/models.py`: GRU architecture, in-memory model manager, loading, unloading, timestamped checkpoint backup, and reload.
 - `src/trade_ai/model/prediction_engine.py`: read-only ensemble inference using model instances from `models.py`.
-- `src/trade_ai/openalgo/openalgo_client.py`, `src/trade_ai/util.py`, `src/trade_ai/model/stock_metadata.py`: shared client, candle utilities, metadata inputs.
+- `src/trade_ai/openalgo/openalgo_client.py`, `src/trade_ai/openalgo/helper.py`, `src/trade_ai/util.py`, `src/trade_ai/model/stock_metadata.py`: shared client, OpenAlgo response conversion, candle utilities, metadata inputs.
 - The OpenAlgo SDK's `analyzerstatus()` method is synchronous; call it without `await` and normalize its dictionary response in `OpenAlgo.get_analyzer_status()`.
 - `src/trade_ai/indicator/`: indicator calculations and their explanatory Markdown files.
 - `src/trade_ai/server/`: FastAPI application, `predict_route.py` prediction route, and `openalgo_route.py` history and analyser status routes.
-- `src/trade_ai/server/serverTypes.py`: generic `UniversalServerResponse` envelope, server status payload, and endpoint response payload/error contracts, including prediction, history candles, and analyser status.
-- `src/trade_ai/model/modelTypes.py`, `src/trade_ai/openalgo/openalgoTypes.py`, and `src/trade_ai/universalTypes.py`: internal domain/request event literals and global intent/event literals.
+- `src/trade_ai/server/serverTypes.py`: generic `UniversalServerResponse` envelope and response-data wrapper.
+- `src/trade_ai/model/modelTypes.py`, `src/trade_ai/openalgo/openalgoTypes.py`, and `src/trade_ai/universalTypes.py`: internal domain/request types, event literals, and global intent/event literals. `openalgoTypes.py` owns OHLCV candle data and the validated prediction candle request model; routes import these module types when needed.
 
 ## Environment and Commands
 

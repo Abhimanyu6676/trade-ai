@@ -1,25 +1,22 @@
 """OpenAlgo history and analyser status endpoints for browser clients."""
 
 import logging
-import math
+from dataclasses import dataclass
 from datetime import date
-from typing import Literal, cast
+from typing import Literal
 
 import pandas as pd
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, model_validator
 
+from trade_ai.openalgo.helper import convert_OHLCV_dfToArray
 from trade_ai.openalgo.openalgo_client import openalgo
 from trade_ai.openalgo.openalgoTypes import (
     TYPE_OPENALGO_EXCHANGE,
     TYPE_OPENALGO_INTERVALS,
+    OHLCVCandleDataType,
 )
 from trade_ai.server.serverTypes import (
-    AnalyserStatusErrorDataType,
-    AnalyserStatusResponseDataType,
-    HistoryCandleDataType,
-    HistoryErrorDataType,
-    HistoryResponseDataType,
     UniversalServerResponse,
     serverDataType,
 )
@@ -31,6 +28,15 @@ logging.basicConfig(
 )
 
 router = APIRouter()
+
+
+# ##     ## ####  ######  ########  #######  ########  ##    ##    ########   #######  ##     ## ######## ########
+# ##     ##  ##  ##    ##    ##    ##     ## ##     ##  ##  ##     ##     ## ##     ## ##     ##    ##    ##
+# ##     ##  ##  ##          ##    ##     ## ##     ##   ####      ##     ## ##     ## ##     ##    ##    ##
+# #########  ##   ######     ##    ##     ## ########     ##       ########  ##     ## ##     ##    ##    ######
+# ##     ##  ##        ##    ##    ##     ## ##   ##      ##       ##   ##   ##     ## ##     ##    ##    ##
+# ##     ##  ##  ##    ##    ##    ##     ## ##    ##     ##       ##    ##  ##     ## ##     ##    ##    ##
+# ##     ## ####  ######     ##     #######  ##     ##    ##       ##     ##  #######   #######     ##    ########
 
 
 class HistoryRequest(BaseModel):
@@ -47,47 +53,26 @@ class HistoryRequest(BaseModel):
         return self
 
 
-HistoryCandle = HistoryCandleDataType
-HistoryResponse = HistoryResponseDataType
+@dataclass
+class HistoryResponseDataType:
+    symbol: str
+    exchange: TYPE_OPENALGO_EXCHANGE
+    interval: TYPE_OPENALGO_INTERVALS
+    candles: list[OHLCVCandleDataType]
+
+
 HistoryServerResponse = UniversalServerResponse[
     Literal["OPENALGO"],
     Literal["HISTORY"],
     HistoryResponseDataType,
-    HistoryErrorDataType,
+    str,
 ]
-
-
-def _history_candles(history: pd.DataFrame) -> list[HistoryCandle]:
-    candles: list[HistoryCandle] = []
-    for timestamp, row in history.iterrows():
-        candle_timestamp = pd.Timestamp(cast(pd.Timestamp, timestamp))
-        if candle_timestamp.tzinfo is None:
-            # The SDK builds daily indexes from epoch seconds without attaching
-            # a timezone; those values originate in UTC.
-            candle_timestamp = candle_timestamp.tz_localize("UTC")
-        candle_values = {
-            name: float(row[name])
-            for name in ("open", "high", "low", "close", "volume")
-        }
-        oi_value = row.get("oi")
-        oi = (
-            float(oi_value)
-            if oi_value is not None and math.isfinite(float(oi_value))
-            else None
-        )
-        candles.append(
-            HistoryCandle(
-                timestamp=int(candle_timestamp.timestamp()),
-                **candle_values,
-                oi=oi,
-            )
-        )
-    return candles
 
 
 @router.post("/history", response_model=HistoryServerResponse)
 async def get_history(request: HistoryRequest) -> HistoryServerResponse:
     """Fetch historical candles from OpenAlgo in its documented candle shape."""
+    logger.info("History requested on route '/api/openalgo/history'")
     try:
         history = await openalgo.get_history(
             symbol=request.symbol.strip().upper(),
@@ -100,7 +85,13 @@ async def get_history(request: HistoryRequest) -> HistoryServerResponse:
             return HistoryServerResponse(
                 intent="OPENALGO",
                 data=serverDataType(
-                    eventType="HISTORY", data=_history_candles(history)
+                    eventType="HISTORY",
+                    data=HistoryResponseDataType(
+                        symbol=request.symbol,
+                        exchange=request.exchange,
+                        interval=request.interval,
+                        candles=convert_OHLCV_dfToArray(history),
+                    ),
                 ),
             )
         return HistoryServerResponse(
@@ -118,14 +109,28 @@ async def get_history(request: HistoryRequest) -> HistoryServerResponse:
         )
 
 
-AnalyserStatusResponse = AnalyserStatusResponseDataType
+#    ###    ##    ##    ###    ##       ##    ##  ######  ######## ########     ########   #######  ##     ## ######## ########
+#   ## ##   ###   ##   ## ##   ##        ##  ##  ##    ## ##       ##     ##    ##     ## ##     ## ##     ##    ##    ##
+#  ##   ##  ####  ##  ##   ##  ##         ####   ##       ##       ##     ##    ##     ## ##     ## ##     ##    ##    ##
+# ##     ## ## ## ## ##     ## ##          ##     ######  ######   ########     ########  ##     ## ##     ##    ##    ######
+# ######### ##  #### ######### ##          ##          ## ##       ##   ##      ##   ##   ##     ## ##     ##    ##    ##
+# ##     ## ##   ### ##     ## ##          ##    ##    ## ##       ##    ##     ##    ##  ##     ## ##     ##    ##    ##
+# ##     ## ##    ## ##     ## ########    ##     ######  ######## ##     ##    ##     ##  #######   #######     ##    ########
+
+
+# OpenAlgo analyser status endpoint response and error types
+class AnalyserStatusResponseDataType(BaseModel):
+    available: bool
+    mode: str | None = None
+    analyze_mode: bool | None = None
+    message: str
 
 
 AnalyserStatusServerResponse = UniversalServerResponse[
     Literal["OPENALGO"],
     Literal["ANALYSER_STATUS"],
     AnalyserStatusResponseDataType,
-    AnalyserStatusErrorDataType,
+    str,
 ]
 
 
@@ -140,7 +145,7 @@ async def get_analyser_status() -> AnalyserStatusServerResponse:
                 intent="OPENALGO",
                 data=serverDataType(
                     eventType="ANALYSER_STATUS",
-                    data=AnalyserStatusResponse(
+                    data=AnalyserStatusResponseDataType(
                         available=True,
                         analyze_mode=response.analyze_mode,
                         mode=response.mode,
