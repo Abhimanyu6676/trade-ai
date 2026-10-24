@@ -14,7 +14,7 @@ from trade_ai.util import lowercase_ohlcv_columns
 
 from ..features import (
     FEATURE_SCHEMA_VERSION,
-    MODEL_INPUT_COLUMNS,
+    LGB_MODEL_INPUT_COLUMNS,
     compute_normalized_features,
 )
 from .labels import apply_triple_barrier
@@ -169,7 +169,7 @@ def prepare_training_data() -> tuple[pd.DataFrame, pd.Series]:
             continue
 
         # Select the canonical feature schema and target separately.
-        feature_cols = list(MODEL_INPUT_COLUMNS)
+        feature_cols = list(LGB_MODEL_INPUT_COLUMNS)
 
         all_features.append(df_clean[feature_cols])
         # Remap Triple Barrier classes from {-1, 0, 1} to {0, 1, 2} for LightGBM multiclass objective
@@ -241,7 +241,7 @@ def train_lightgbm_model():
         json.dump(
             {
                 "feature_schema_version": FEATURE_SCHEMA_VERSION,
-                "feature_columns": list(MODEL_INPUT_COLUMNS),
+                "feature_columns": list(LGB_MODEL_INPUT_COLUMNS),
             },
             schema_file,
             indent=2,

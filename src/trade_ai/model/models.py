@@ -11,7 +11,11 @@ import lightgbm as lgb
 import torch
 from torch import nn
 
-from trade_ai.model.features import FEATURE_SCHEMA_VERSION, MODEL_INPUT_COLUMNS
+from trade_ai.model.features import (
+    FEATURE_SCHEMA_VERSION,
+    GRU_MODEL_INPUT_COLUMNS,
+    LGB_MODEL_INPUT_COLUMNS,
+)
 from trade_ai.model.modelTypes import MODEL_NAMES, ModelName
 
 BASE_DIR = os.path.dirname(__file__)
@@ -93,7 +97,7 @@ class ModelManager:
                             checkpoint = json.load(schema_file)
                         self._validate_feature_schema(checkpoint, model_name)
                         model = lgb.Booster(model_file=LGB_MODEL_PATH)
-                        if tuple(model.feature_name()) != MODEL_INPUT_COLUMNS:
+                        if tuple(model.feature_name()) != LGB_MODEL_INPUT_COLUMNS:
                             raise ValueError(
                                 "LightGBM feature names do not match the checkpoint schema"
                             )
@@ -119,7 +123,7 @@ class ModelManager:
                             raise ValueError(
                                 "GRU checkpoint is missing gru.weight_ih_l0"
                             )
-                        if int(input_weights.shape[1]) != len(MODEL_INPUT_COLUMNS):
+                        if int(input_weights.shape[1]) != len(GRU_MODEL_INPUT_COLUMNS):
                             raise ValueError(
                                 "GRU input width does not match the checkpoint feature schema"
                             )
@@ -147,7 +151,10 @@ class ModelManager:
             raise ValueError(
                 f"{model_name.upper()} checkpoint feature schema version is incompatible"
             )
-        if tuple(checkpoint.get("feature_columns", ())) != MODEL_INPUT_COLUMNS:
+        expected_columns = (
+            GRU_MODEL_INPUT_COLUMNS if model_name == "gru" else LGB_MODEL_INPUT_COLUMNS
+        )
+        if tuple(checkpoint.get("feature_columns", ())) != expected_columns:
             raise ValueError(
                 f"{model_name.upper()} checkpoint feature columns do not match this code"
             )

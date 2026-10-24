@@ -20,9 +20,9 @@ trains LightGBM first and GRU second.
    with missing targets may be sequence context, but each sequence must end on
    a labeled row. Train the two-layer GRU in batches; save its state after each
    successful epoch. The checkpoint includes the feature schema version and
-   ordered input-column names. Both models use the 55 engineered inputs only;
-   raw OHLCV columns remain available for feature calculation but are excluded
-   from model inputs.
+   ordered input-column names. Each trainer selects its model-specific schema;
+   GRU excludes static metadata, LightGBM includes it, and both exclude raw
+   OHLCV from model inputs. See `../features.md` for counts and full input lists.
 6. **Reload selected models.** A `finally` block validates checkpoint schema
    metadata and reloads selected models, including when training raises an
    error. A schema mismatch leaves that model unloaded and requires retraining.
@@ -31,7 +31,7 @@ The default GRU run uses 10 epochs, 30 candles per sequence, and batches of 256.
 Checkpoint files are under `src/trade_ai/model/.run_cache/`:
 `lgb_trading_model_v{FEATURE_SCHEMA_VERSION}.txt` with its `.schema.json`
 manifest, and `gru_trading_model_v{FEATURE_SCHEMA_VERSION}.pth` with schema
-metadata in the checkpoint. The current version is 2.
+metadata in the checkpoint. The current version is 4.
 
 Run training in the foreground from the repository root with:
 

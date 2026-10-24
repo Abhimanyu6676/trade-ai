@@ -10,7 +10,12 @@ Last reviewed: 2026-10-24.
 ## Maintenance
 
 - Keep project-specific facts and technical behavior in `context.md`, not in this instruction file.
-- When behavior, architecture, model inputs, startup, environment requirements, or operational gotchas change, update the relevant sections of `context.md` in the same change.
+- When architecture, runtime behavior, data contracts, startup, environment requirements, or operational gotchas change, update the relevant sections of `context.md` in the same change. Feature count, name, timeframe, or scaling changes alone belong in `features.md`; update `context.md` for feature-related structural/context changes such as renaming or moving the feature module.
+- Treat `src/trade_ai/model/features.md` as the source of truth for feature rules, scaling notes, per-model input counts, and complete feature lists.
+- Never include raw OHLCV values as model input features; keep them in the source frame only for calculations.
+- Whenever features or feature-building behavior change, update `features.md` in the same change with the total input count and full feature-name/style list for both models, even if only one model's schema changed.
+- For every added feature, assess its normalization and whether it is relative/scale-independent. Warn the user about any feature that is unnormalized or non-relative, and distinguish bounded, binary, or one-hot features from raw scale-dependent values.
+- When the user prompts `check/evaluate features`, perform and report a feature audit for every model. For each model, include the total number of actual model input features and list every input feature name with its style in brackets **before** the name (for example, `[relative] ROC_1m`, `[percentage %] Return_1m`, `[one-hot flag 0/1] Cap_Large`, or `[RSI 0-1] RSI_14_1m`). Base counts and lists on the model-specific input schemas; exclude raw OHLCV columns, timestamps, labels, and intermediate calculations. Explicitly flag any unnormalized or non-relative input, including bounded/binary inputs while noting their bounded or categorical nature.
 - Update `setup-start.md` when setup or startup instructions change. 
 - Update `readme.md` when the project summary, major capabilities, or structure changes.
 - Update `server.md` whenever an endpoint is added or modified

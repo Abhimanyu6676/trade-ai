@@ -15,10 +15,10 @@ from trade_ai.model.stock_metadata import (
 )
 from trade_ai.util import lowercase_ohlcv_columns, resample_ohlcv
 
-DEFAULT_TIMEFRAMES = ("1m", "3m", "5m", "15m", "30m", "1h")
+DEFAULT_TIMEFRAMES = ("1m", "5m", "15m", "1h")
 DEFAULT_EMA_SPANS = (9, 21, 50)
 # Increment when the model input feature names, order, or meanings change.
-FEATURE_SCHEMA_VERSION = 2
+FEATURE_SCHEMA_VERSION = 4
 
 
 def _add_multi_timeframe_features(
@@ -96,21 +96,36 @@ def compute_normalized_features(
     # Section 2: EMA stacks, timeframe-specific indicators, and daily gate.
     df = _add_multi_timeframe_features(df, model_type, timeframes, ema_spans, relative)
 
-    # Section 3: Ticker-level market-cap and sector flags.
-    df = encode_categorical_metadata(df, ticker)
+    # Section 3: Static ticker metadata is an input to LightGBM only.
+    if model_type == "lgb":
+        df = encode_categorical_metadata(df, ticker)
+        active_feature_columns = LGB_FEATURE_COLUMNS
+    else:
+        df = df.drop(
+            columns=[
+                column
+                for column in METADATA_FEATURE_COLUMNS
+                if column in df.columns
+            ]
+        )
+        active_feature_columns = GRU_FEATURE_COLUMNS
 
     # Section 4: Add forward labels only for training; keep the latest row for inference.
-    required_columns = FEATURE_COLUMNS
+    required_columns = active_feature_columns
     if include_targets:
         df["Future_ROC_5m"] = df["close"].shift(-5).pct_change(5)
         df["Target_Direction"] = (df["Future_ROC_5m"] > 0).astype(float)
-        required_columns = [*FEATURE_COLUMNS, "Future_ROC_5m", "Target_Direction"]
+        required_columns = [
+            *active_feature_columns,
+            "Future_ROC_5m",
+            "Target_Direction",
+        ]
 
     return df.dropna(subset=required_columns)
 
 
-# Model input schema for the default timeframes and EMA spans above.
-FEATURE_COLUMNS = [
+# Shared technical features for the default timeframes and EMA spans above.
+BASE_FEATURE_COLUMNS = [
     "ROC_1m",
     "ROC_5m",
     "ROC_15m",
@@ -125,9 +140,11 @@ FEATURE_COLUMNS = [
             f"Sweep_{timeframe}",
         )
     ],
-    *METADATA_FEATURE_COLUMNS,
 ]
 
-# Keep training and inference input order fixed, independent of source column order.
+# Keep model-specific input order fixed, independent of source column order.
 # Raw OHLCV remains in the frame for feature calculations, but is not model input.
-MODEL_INPUT_COLUMNS = tuple(FEATURE_COLUMNS)
+GRU_FEATURE_COLUMNS = tuple(BASE_FEATURE_COLUMNS)
+LGB_FEATURE_COLUMNS = [*BASE_FEATURE_COLUMNS, *METADATA_FEATURE_COLUMNS]
+GRU_MODEL_INPUT_COLUMNS = GRU_FEATURE_COLUMNS
+LGB_MODEL_INPUT_COLUMNS = tuple(LGB_FEATURE_COLUMNS)

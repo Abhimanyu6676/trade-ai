@@ -92,7 +92,6 @@ async def fetch_and_clean_candles(
                 "close",
                 "Return_1m",
                 "ATR_Pct_5m",
-                "Volatility_20_30m",
                 "Macro_Trend_Gate",
                 "volume",
             ]

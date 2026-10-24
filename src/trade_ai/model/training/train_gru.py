@@ -15,7 +15,7 @@ from trade_ai.util import lowercase_ohlcv_columns
 
 from ..features import (
     FEATURE_SCHEMA_VERSION,
-    MODEL_INPUT_COLUMNS,
+    GRU_MODEL_INPUT_COLUMNS,
     compute_normalized_features,
 )
 from .labels import apply_triple_barrier
@@ -163,7 +163,7 @@ def train_gru_model(
     logger.info("🚀 Initializing GRU Training Pipeline on device: %s", device)
 
     tickers = list(STOCK_METADATA.keys())
-    feature_cols = list(MODEL_INPUT_COLUMNS)
+    feature_cols = list(GRU_MODEL_INPUT_COLUMNS)
     model = None
     optimizer = None
     criterion = nn.CrossEntropyLoss()
@@ -179,7 +179,7 @@ def train_gru_model(
                 logger.warning("Skipping %s: Data unavailable.", ticker)
                 continue
 
-            # Feature engineering and metadata encoding
+            # Build technical features; GRU feature calculation excludes metadata.
             df_feat = compute_normalized_features(raw_df, ticker, model_type="gru")
 
             # Triple barrier target generation
