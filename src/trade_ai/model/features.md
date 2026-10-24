@@ -15,13 +15,13 @@
 encodes metadata for LightGBM and removes metadata columns for GRU. Training,
 inference, and checkpoint validation use the corresponding model-specific input
 tuple. Checkpoint filenames include the schema version; checkpoints also store
-the version and ordered input names.
+the version and ordered input names. The current feature schema version is 5.
 
 ## Model input inventory
 
 The tables show every input name and its scaling style. The technical features
-are shared by both models; RSI scaling differs. GRU has 31 inputs. LightGBM has
-those 31 plus 10 metadata flags, for 41 total. Active timeframes are 1m, 5m,
+are shared by both models; RSI scaling differs. GRU has 35 inputs. LightGBM has
+those 35 plus 10 metadata flags, for 45 total. Active timeframes are 1m, 5m,
 15m, and 1h; 3m and 30m are excluded.
 
 ### Returns — 3 features per model
@@ -34,14 +34,46 @@ those 31 plus 10 metadata flags, for 41 total. Active timeframes are 1m, 5m,
 | `ROC_5m` | Relative return ratio | Relative return ratio |
 | `ROC_15m` | Relative return ratio | Relative return ratio |
 
-### Multi-timeframe indicators — 28 features per model
+### Multi-timeframe indicators — 32 features per model
 
-| Timeframe | RSI | ATR | EMA 9 distance | EMA 21 distance | EMA 50 distance | FVG | Sweep |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 1m | `RSI_14_1m` (GRU: 0–1; LGB: 0–100) | `ATR_14_1m` (relative to close) | `EMA9_Dist_1m` (relative to EMA) | `EMA21_Dist_1m` (relative to EMA) | `EMA50_Dist_1m` (relative to EMA) | `FVG_1m` (binary 0/1) | `Sweep_1m` (binary 0/1) |
-| 5m | `RSI_14_5m` (GRU: 0–1; LGB: 0–100) | `ATR_14_5m` (relative to close) | `EMA9_Dist_5m` (relative to EMA) | `EMA21_Dist_5m` (relative to EMA) | `EMA50_Dist_5m` (relative to EMA) | `FVG_5m` (binary 0/1) | `Sweep_5m` (binary 0/1) |
-| 15m | `RSI_14_15m` (GRU: 0–1; LGB: 0–100) | `ATR_14_15m` (relative to close) | `EMA9_Dist_15m` (relative to EMA) | `EMA21_Dist_15m` (relative to EMA) | `EMA50_Dist_15m` (relative to EMA) | `FVG_15m` (binary 0/1) | `Sweep_15m` (binary 0/1) |
-| 1h | `RSI_14_1h` (GRU: 0–1; LGB: 0–100) | `ATR_14_1h` (relative to close) | `EMA9_Dist_1h` (relative to EMA) | `EMA21_Dist_1h` (relative to EMA) | `EMA50_Dist_1h` (relative to EMA) | `FVG_1h` (binary 0/1) | `Sweep_1h` (binary 0/1) |
+The volatility ratio is rolling standard deviation of one-bar percentage
+returns over 10 bars divided by the same measure over 30 bars. Periods are bars
+of the given timeframe (so 10 bars on 5m data spans 50 minutes).
+
+| Timeframe | Feature | Input name | GRU style | LightGBM style |
+| --- | --- | --- | --- | --- |
+| 1m | RSI | `RSI_14_1m` | Bounded 0–1 | Bounded 0–100 |
+| 1m | ATR | `ATR_14_1m` | Relative to close | Relative to close |
+| 1m | EMA 9 distance | `EMA9_Dist_1m` | Relative to EMA | Relative to EMA |
+| 1m | EMA 21 distance | `EMA21_Dist_1m` | Relative to EMA | Relative to EMA |
+| 1m | EMA 50 distance | `EMA50_Dist_1m` | Relative to EMA | Relative to EMA |
+| 1m | FVG | `FVG_1m` | Binary 0/1 | Binary 0/1 |
+| 1m | Sweep | `Sweep_1m` | Binary 0/1 | Binary 0/1 |
+| 1m | Volatility ratio | `Vol_Ratio_10_30_1m` | Relative volatility ratio | Relative volatility ratio |
+| 5m | RSI | `RSI_14_5m` | Bounded 0–1 | Bounded 0–100 |
+| 5m | ATR | `ATR_14_5m` | Relative to close | Relative to close |
+| 5m | EMA 9 distance | `EMA9_Dist_5m` | Relative to EMA | Relative to EMA |
+| 5m | EMA 21 distance | `EMA21_Dist_5m` | Relative to EMA | Relative to EMA |
+| 5m | EMA 50 distance | `EMA50_Dist_5m` | Relative to EMA | Relative to EMA |
+| 5m | FVG | `FVG_5m` | Binary 0/1 | Binary 0/1 |
+| 5m | Sweep | `Sweep_5m` | Binary 0/1 | Binary 0/1 |
+| 5m | Volatility ratio | `Vol_Ratio_10_30_5m` | Relative volatility ratio | Relative volatility ratio |
+| 15m | RSI | `RSI_14_15m` | Bounded 0–1 | Bounded 0–100 |
+| 15m | ATR | `ATR_14_15m` | Relative to close | Relative to close |
+| 15m | EMA 9 distance | `EMA9_Dist_15m` | Relative to EMA | Relative to EMA |
+| 15m | EMA 21 distance | `EMA21_Dist_15m` | Relative to EMA | Relative to EMA |
+| 15m | EMA 50 distance | `EMA50_Dist_15m` | Relative to EMA | Relative to EMA |
+| 15m | FVG | `FVG_15m` | Binary 0/1 | Binary 0/1 |
+| 15m | Sweep | `Sweep_15m` | Binary 0/1 | Binary 0/1 |
+| 15m | Volatility ratio | `Vol_Ratio_10_30_15m` | Relative volatility ratio | Relative volatility ratio |
+| 1h | RSI | `RSI_14_1h` | Bounded 0–1 | Bounded 0–100 |
+| 1h | ATR | `ATR_14_1h` | Relative to close | Relative to close |
+| 1h | EMA 9 distance | `EMA9_Dist_1h` | Relative to EMA | Relative to EMA |
+| 1h | EMA 21 distance | `EMA21_Dist_1h` | Relative to EMA | Relative to EMA |
+| 1h | EMA 50 distance | `EMA50_Dist_1h` | Relative to EMA | Relative to EMA |
+| 1h | FVG | `FVG_1h` | Binary 0/1 | Binary 0/1 |
+| 1h | Sweep | `Sweep_1h` | Binary 0/1 | Binary 0/1 |
+| 1h | Volatility ratio | `Vol_Ratio_10_30_1h` | Relative volatility ratio | Relative volatility ratio |
 
 ### LightGBM-only metadata — 10 features
 
@@ -60,8 +92,9 @@ those 31 plus 10 metadata flags, for 41 total. Active timeframes are 1m, 5m,
 
 ## Scaling audit
 
-No model input is a raw price or volume value. ROC, ATR, and EMA inputs are
-relative ratios. RSI is bounded, with model-specific ranges shown above. FVG,
+No model input is a raw price or volume value. ROC, ATR, EMA, and volatility
+ratio inputs are relative/dimensionless ratios. RSI is bounded, with model-
+specific ranges shown above. FVG,
 Sweep, and LightGBM metadata flags are normalized to 0/1 but are not relative
 to price; flag them in audits as intentional dimensionless/categorical inputs.
 RSI is also dimensionless rather than price-relative; LightGBM's 0–100 range is

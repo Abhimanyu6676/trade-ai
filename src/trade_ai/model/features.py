@@ -8,6 +8,7 @@ from trade_ai.indicator import (
     calculate_fvg,
     calculate_liquidity_sweep,
     calculate_rsi,
+    calculate_volatility_ratio,
 )
 from trade_ai.model.stock_metadata import (
     METADATA_FEATURE_COLUMNS,
@@ -18,7 +19,7 @@ from trade_ai.util import lowercase_ohlcv_columns, resample_ohlcv
 DEFAULT_TIMEFRAMES = ("1m", "5m", "15m", "1h")
 DEFAULT_EMA_SPANS = (9, 21, 50)
 # Increment when the model input feature names, order, or meanings change.
-FEATURE_SCHEMA_VERSION = 4
+FEATURE_SCHEMA_VERSION = 5
 
 
 def _add_multi_timeframe_features(
@@ -64,6 +65,9 @@ def _add_multi_timeframe_features(
 
         features_tf[f"FVG_{tf}"] = calculate_fvg(tf_df)
         features_tf[f"Sweep_{tf}"] = calculate_liquidity_sweep(tf_df, window=20)
+        features_tf[f"Vol_Ratio_10_30_{tf}"] = calculate_volatility_ratio(
+            tf_df["close"], period1=10, period2=30
+        )
 
         # 3. Safely map back to the 1-minute timeline using merge_asof (backward)
         df = pd.merge_asof(
@@ -138,6 +142,7 @@ BASE_FEATURE_COLUMNS = [
             *(f"EMA{span}_Dist_{timeframe}" for span in DEFAULT_EMA_SPANS),
             f"FVG_{timeframe}",
             f"Sweep_{timeframe}",
+            f"Vol_Ratio_10_30_{timeframe}",
         )
     ],
 ]

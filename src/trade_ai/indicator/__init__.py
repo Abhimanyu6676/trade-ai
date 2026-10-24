@@ -12,7 +12,10 @@ from trade_ai.indicator.macd import calculate_macd
 from trade_ai.indicator.macro_trend import calculate_macro_trend_gate
 from trade_ai.indicator.orb import calculate_orb
 from trade_ai.indicator.rsi import calculate_rsi
-from trade_ai.indicator.volatility import calculate_volatility
+from trade_ai.indicator.volatility import (
+    calculate_volatility,
+    calculate_volatility_ratio,
+)
 from trade_ai.indicator.vwap import calculate_vwap
 
 __all__ = [
@@ -28,6 +31,7 @@ __all__ = [
     "calculate_orb",
     "calculate_rsi",
     "calculate_volatility",
+    "calculate_volatility_ratio",
     "calculate_vwap",
     "detect_fvg_events",
 ]
