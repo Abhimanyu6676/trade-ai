@@ -67,7 +67,7 @@ The market-analysis path is:
 - `src/trade_ai/indicator/`: indicator calculations and their explanatory Markdown files.
 - `src/trade_ai/server/`: FastAPI application, `predict_route.py` prediction route, and `openalgo_route.py` history and analyser status routes.
 - `src/trade_ai/server/serverTypes.py`: generic `UniversalServerResponse` envelope and response-data wrapper.
-- `src/trade_ai/model/modelTypes.py`, `src/trade_ai/openalgo/openalgoTypes.py`, and `src/trade_ai/universalTypes.py`: internal domain/request types, event literals, and global intent/event literals. `openalgoTypes.py` owns OHLCV candle data and the validated prediction candle request model; routes import these module types when needed.
+- `src/trade_ai/model/modelTypes.py`, `src/trade_ai/openalgo/openalgoTypes.py`, and `src/trade_ai/universalTypes.py`: internal domain/request types, event literals, and global intent/event literals. `modelTypes.py` owns the `ModelName` literal and `MODEL_NAMES` tuple; `openalgoTypes.py` owns OHLCV candle data and the validated prediction candle request model. Routes and model code import these module types when needed.
 
 ## Environment and Commands
 

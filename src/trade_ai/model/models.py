@@ -5,19 +5,17 @@ import os
 import shutil
 import threading
 from datetime import datetime
-from typing import Literal
 
 import lightgbm as lgb
 import torch
 from torch import nn
 
+from trade_ai.model.modelTypes import MODEL_NAMES, ModelName
+
 BASE_DIR = os.path.dirname(__file__)
 CACHE_DIR = os.path.join(BASE_DIR, ".run_cache")
 LGB_MODEL_PATH = os.path.join(CACHE_DIR, "lgb_trading_model.txt")
 GRU_MODEL_PATH = os.path.join(CACHE_DIR, "gru_trading_model.pth")
-
-ModelName = Literal["gru", "lgb"]
-MODEL_NAMES: tuple[ModelName, ...] = ("gru", "lgb")
 
 logger = logging.getLogger(__name__)
 
