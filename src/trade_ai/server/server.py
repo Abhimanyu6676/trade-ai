@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -84,7 +85,7 @@ async def handle_request_validation_error(
     )
     return JSONResponse(
         status_code=422,
-        content=_error_response(request.url.path, message),
+        content=jsonable_encoder(_error_response(request.url.path, message)),
     )
 
 
@@ -92,7 +93,9 @@ async def handle_request_validation_error(
 async def handle_http_error(request: Request, error: HTTPException) -> JSONResponse:
     return JSONResponse(
         status_code=error.status_code,
-        content=_error_response(request.url.path, str(error.detail)),
+        content=jsonable_encoder(
+            _error_response(request.url.path, str(error.detail))
+        ),
         headers=error.headers,
     )
 
@@ -101,7 +104,7 @@ async def handle_http_error(request: Request, error: HTTPException) -> JSONRespo
 async def handle_unexpected_error(request: Request, error: Exception) -> JSONResponse:
     return JSONResponse(
         status_code=500,
-        content=_error_response(request.url.path, str(error)),
+        content=jsonable_encoder(_error_response(request.url.path, str(error))),
     )
 
 

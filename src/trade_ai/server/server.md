@@ -4,7 +4,9 @@
 
 `app.py` loads the prediction models, then runs Uvicorn on port `3010` in the
 main process. Prediction requests fetch candles and run inference in the API
-process; there is no background server thread or prediction queue.
+process. Synchronous SDK calls and CPU-heavy prediction work are offloaded to
+worker threads so they do not block the asyncio event loop; there is no
+separate prediction process or application-managed prediction queue.
 
 Start the application from the repository root:
 
@@ -39,6 +41,38 @@ OpenAlgo candle data and the validated `OhlcvCandle` model for caller-supplied
 prediction candles live in `openalgo/openalgoTypes.py`. Route-specific
 response contracts are defined with their routes. Errors are strings for the
 current endpoints.
+
+## Async and non-blocking endpoint rules
+
+- Every FastAPI endpoint handler must be declared with `async def`.
+- Await asynchronous I/O. Do not call synchronous network, database, filesystem,
+  or broker SDK operations directly from an endpoint or an async helper; run
+  blocking calls with `await asyncio.to_thread(...)` or an appropriate
+  asynchronous client.
+- Offload CPU-heavy feature engineering, model inference, large DataFrame
+  transformations, and large response conversions from the event loop with
+  `asyncio.to_thread(...)` or a background job. Keep only small, bounded work
+  directly in the handler.
+- Do not use `asyncio.run()` inside an ASGI request handler. It is for bridging
+  from synchronous training/CLI code, not for endpoint code.
+- Keep request and response sizes bounded where practical. Consider worker-pool
+  saturation and large response serialization when reviewing server performance.
+
+## Server review check
+
+When the user asks to `evaluate server`, `check server`, or asks for a server
+module review, audit all endpoint handlers and their downstream calls. Report
+handlers that are not async, synchronous I/O or CPU-heavy work that can block
+the event loop, large response or worker-pool performance risks, and any other
+changes that may affect application or server performance. Include the affected
+route or module and a concise finding for each issue.
+
+The current routes follow this policy: history and analyser SDK calls run in
+worker threads; prediction preprocessing, inference, caller-candle conversion,
+and history candle conversion plus JSON encoding are offloaded; the health
+check only performs small in-memory response construction. Error handlers
+encode the typed response envelope into JSON-compatible values before building
+`JSONResponse` objects.
 
 ### OpenAlgo history
 

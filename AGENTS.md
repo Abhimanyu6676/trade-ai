@@ -19,6 +19,7 @@ Last reviewed: 2026-10-24.
 - Update `setup-start.md` when setup or startup instructions change. 
 - Update `readme.md` when the project summary, major capabilities, or structure changes.
 - Update `server.md` whenever an endpoint is added or modified
+- Treat `src/trade_ai/server/server.md` as the server module and API endpoint guidebook and rulebook. Read and follow it before changing server code or endpoints, and update it with server behavior changes.
 - When training logic or lifecycle steps change, update `src/trade_ai/model/training/training.md` in the same change.
 - Keep types with the module they describe in that module's `*Types.py` file. Routes should import and reuse those types when defining request or response contracts; for example, OHLCV candle data and validation belong in `openalgo/openalgoTypes.py`.
 - Keep this file limited to agent workflow and repository maintenance instructions.

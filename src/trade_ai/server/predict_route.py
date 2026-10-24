@@ -1,5 +1,6 @@
-"""Structured prediction endpoint; inference is handled by the main app thread."""
+"""Structured prediction endpoint with blocking work offloaded to worker threads."""
 
+import asyncio
 from dataclasses import dataclass
 from typing import Literal, cast
 
@@ -54,15 +55,24 @@ PredictionServerResponse = UniversalServerResponse[
 ]
 
 
+def _predict_validated_candles(ticker: str, candles: list[OhlcvCandle]):
+    """Convert and predict caller candles outside the event loop."""
+    return predict_from_candles(
+        ticker,
+        [candle.model_dump() for candle in candles],
+    )
+
+
 @router.post("/predict", response_model=PredictionServerResponse)
 async def predict(request: PredictionRequest) -> PredictionServerResponse:
     """Run inference on supplied candles or fetch history from OpenAlgo."""
     try:
         ticker = request.ticker.strip().upper()
         if request.candles is not None:
-            candles, signal, confidence = predict_from_candles(
+            candles, signal, confidence = await asyncio.to_thread(
+                _predict_validated_candles,
                 ticker,
-                [candle.model_dump() for candle in request.candles],
+                request.candles,
             )
             days_back = None
         else:

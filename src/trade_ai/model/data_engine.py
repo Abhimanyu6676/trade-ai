@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 from typing import Any
 
@@ -10,6 +11,7 @@ from trade_ai.openalgo.openalgo_client import TYPE_OPENALGO_EXCHANGE, openalgo
 from trade_ai.util import merge_ohlcv_history
 
 FEATURE_LOOKBACK_CALENDAR_DAYS = 30
+MAX_ALLOWED_ROWS = 25000
 
 
 async def fetch_and_clean_candles(
@@ -50,59 +52,64 @@ async def fetch_and_clean_candles(
         if not isinstance(df, pd.DataFrame) or df.empty:
             return None, "API Empty Payload Error", 0.0
 
-        # Normalize order before trimming so the retained tail is the newest data.
-        df = merge_ohlcv_history(df)
-
-        # Increased row cap to safely allow ~60 days of 1m history (~22,500 rows max)
-        # without overflowing your 4GB VPS RAM during feature generation.
-        MAX_ALLOWED_ROWS = 25000
-        if len(df) > MAX_ALLOWED_ROWS:
-            print(
-                f"⚠️ Trimming historical rows from {len(df)} down to {MAX_ALLOWED_ROWS} max limit."
-            )
-            df = df.tail(MAX_ALLOWED_ROWS).reset_index(drop=True)
-
-        # Engineer on the entire chronological history so higher-timeframe EMAs
-        # are warmed up before the requested/display window begins.
-        processed_df = compute_normalized_features(df, ticker, model_type="gru")
-
-        if processed_df.empty:
-            return None, "Insufficient Data After Feature Warmup", 0.0
-
-        ai_signal, confidence = run_ai_prediction_inference(
-            df,
-            ticker,
-            sequence_length=DEFAULT_SEQUENCE_LENGTH,
+        return await asyncio.to_thread(
+            _process_fetched_candles, df, ticker, display_start_date
         )
-
-        display_timestamps = pd.to_datetime(processed_df["timestamp"])
-        processed_df = processed_df.loc[
-            display_timestamps.dt.date >= display_start_date
-        ].copy()
-        if processed_df.empty:
-            return None, "No candles found in the requested display window", 0.0
-
-        display_layout = [
-            col
-            for col in [
-                "timestamp",
-                "open",
-                "high",
-                "low",
-                "close",
-                "Return_1m",
-                "ATR_Pct_5m",
-                "Macro_Trend_Gate",
-                "volume",
-            ]
-            if col in processed_df.columns
-        ]
-
-        return processed_df[display_layout], ai_signal, confidence
 
     except Exception as e:
         print(f"[Data Engine Exception]: {e}")
         return None, f"Execution Failure: {e!s}", 0.0
+
+
+def _process_fetched_candles(
+    df: pd.DataFrame, ticker: str, display_start_date: datetime.date
+) -> tuple[pd.DataFrame | None, int | str, float]:
+    """Normalize, engineer, infer, and select display rows off the event loop."""
+    # Normalize order before trimming so the retained tail is the newest data.
+    df = merge_ohlcv_history(df)
+
+    # Keep enough rows for warm-up without unbounded feature-generation cost.
+    if len(df) > MAX_ALLOWED_ROWS:
+        print(
+            f"⚠️ Trimming historical rows from {len(df)} down to {MAX_ALLOWED_ROWS} max limit."
+        )
+        df = df.tail(MAX_ALLOWED_ROWS).reset_index(drop=True)
+
+    # Engineer on the entire chronological history so higher-timeframe EMAs
+    # are warmed up before the requested/display window begins.
+    processed_df = compute_normalized_features(df, ticker, model_type="gru")
+    if processed_df.empty:
+        return None, "Insufficient Data After Feature Warmup", 0.0
+
+    ai_signal, confidence = run_ai_prediction_inference(
+        df,
+        ticker,
+        sequence_length=DEFAULT_SEQUENCE_LENGTH,
+    )
+
+    display_timestamps = pd.to_datetime(processed_df["timestamp"])
+    processed_df = processed_df.loc[
+        display_timestamps.dt.date >= display_start_date
+    ].copy()
+    if processed_df.empty:
+        return None, "No candles found in the requested display window", 0.0
+
+    display_layout = [
+        col
+        for col in [
+            "timestamp",
+            "open",
+            "high",
+            "low",
+            "close",
+            "Return_1m",
+            "ATR_Pct_5m",
+            "Macro_Trend_Gate",
+            "volume",
+        ]
+        if col in processed_df.columns
+    ]
+    return processed_df[display_layout], ai_signal, confidence
 
 
 def predict_from_candles(ticker: str, candles: list[dict[str, Any]]):

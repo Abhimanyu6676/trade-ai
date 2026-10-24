@@ -1,5 +1,6 @@
 """OpenAlgo history and analyser status endpoints for browser clients."""
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import date
@@ -7,7 +8,9 @@ from typing import Literal
 
 import pandas as pd
 from fastapi import APIRouter
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, model_validator
+from starlette.responses import JSONResponse
 
 from trade_ai.openalgo.helper import convert_OHLCV_dfToArray
 from trade_ai.openalgo.openalgo_client import openalgo
@@ -69,8 +72,27 @@ HistoryServerResponse = UniversalServerResponse[
 ]
 
 
+def _build_history_json_response(
+    request: HistoryRequest, history: pd.DataFrame
+) -> JSONResponse:
+    """Convert and encode a potentially large history response off the loop."""
+    response = HistoryServerResponse(
+        intent="OPENALGO",
+        data=serverDataType(
+            eventType="HISTORY",
+            data=HistoryResponseDataType(
+                symbol=request.symbol,
+                exchange=request.exchange,
+                interval=request.interval,
+                candles=convert_OHLCV_dfToArray(history),
+            ),
+        ),
+    )
+    return JSONResponse(content=jsonable_encoder(response))
+
+
 @router.post("/history", response_model=HistoryServerResponse)
-async def get_history(request: HistoryRequest) -> HistoryServerResponse:
+async def get_history(request: HistoryRequest) -> HistoryServerResponse | JSONResponse:
     """Fetch historical candles from OpenAlgo in its documented candle shape."""
     logger.info("History requested on route '/api/openalgo/history'")
     try:
@@ -82,17 +104,8 @@ async def get_history(request: HistoryRequest) -> HistoryServerResponse:
             end_date=request.end_date,
         )
         if isinstance(history, pd.DataFrame):
-            return HistoryServerResponse(
-                intent="OPENALGO",
-                data=serverDataType(
-                    eventType="HISTORY",
-                    data=HistoryResponseDataType(
-                        symbol=request.symbol,
-                        exchange=request.exchange,
-                        interval=request.interval,
-                        candles=convert_OHLCV_dfToArray(history),
-                    ),
-                ),
+            return await asyncio.to_thread(
+                _build_history_json_response, request, history
             )
         return HistoryServerResponse(
             intent="OPENALGO",

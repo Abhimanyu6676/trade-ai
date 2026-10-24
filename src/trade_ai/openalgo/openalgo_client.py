@@ -102,7 +102,8 @@ class OpenAlgo:
 
         try:
             # The OpenAlgo SDK's analyzerstatus() is synchronous and returns a dict.
-            statusRes = self.initiate().analyzerstatus()
+            client = self.initiate()
+            statusRes = await asyncio.to_thread(client.analyzerstatus)
             if statusRes.get("status") == "success":
                 data = statusRes.get("data", {})
                 if not isinstance(data, dict):
