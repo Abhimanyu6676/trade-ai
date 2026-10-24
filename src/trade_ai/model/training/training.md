@@ -15,7 +15,11 @@ trains LightGBM first and GRU second.
    sort timestamps oldest-to-newest, and keep only the last row per timestamp
    before computing features and Triple Barrier labels. Drop rows with missing
    targets. Combine ticker data, make an unshuffled 80/20 train/validation
-   split, and train up to 500 rounds with early stopping. Save the checkpoint.
+   split, and train up to 500 rounds with early stopping. For cache misses in
+   either trainer, downloaders await OpenAlgo and request distinct inclusive
+   30-calendar-day chunks, with up to three attempts per chunk. A chunk that
+   fails all attempts aborts that ticker's download rather than using partial
+   history. Save the checkpoint.
 5. **Prepare and train GRU** when selected. For each ticker and epoch, load
    history with the same normalization, chronological sorting, and timestamp
    deduplication, then compute features and labels and build same-session

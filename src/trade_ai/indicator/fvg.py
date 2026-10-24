@@ -54,7 +54,7 @@ def detect_fvg_events(
     low = bars["low"].to_numpy(dtype=float)
     close = bars["close"].to_numpy(dtype=float)
     if liquidity_values is None:
-        liquidity_values = calculate_liquidity(bars)
+        liquidity_values = calculate_liquidity_extended(bars)
     if len(bars) == 0:
         return pd.DataFrame(
             {

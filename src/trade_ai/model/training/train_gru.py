@@ -1,6 +1,8 @@
+import asyncio
 import logging
 import os
 from datetime import date, timedelta
+from time import sleep
 
 import numpy as np
 import pandas as pd
@@ -78,24 +80,42 @@ def download_stock_history_in_chunks(
     chunk_days: int = 30,
     retries: int = 3,
 ) -> pd.DataFrame | None:
-    """Downloads historical 1-minute candles in chunks via OpenAlgo API."""
+    """Download historical 1-minute candles in inclusive date chunks."""
+    if chunk_days < 1:
+        raise ValueError("chunk_days must be at least 1")
+    if retries < 1:
+        raise ValueError("retries must be at least 1")
+
     current_start = start_date
     all_chunks: list[pd.DataFrame] = []
 
-    while current_start < end_date:
-        current_end = min(current_start + timedelta(days=chunk_days), end_date)
+    while current_start <= end_date:
+        current_end = min(
+            current_start + timedelta(days=chunk_days - 1), end_date
+        )
 
         success = False
         for attempt in range(retries):
             try:
-                df_chunk = openalgo.get_history(
-                    symbol=ticker,
-                    exchange=exchange,
-                    interval="1m",
-                    start_date=start_date,
-                    end_date=end_date,
+                df_chunk = asyncio.run(
+                    openalgo.get_history(
+                        symbol=ticker,
+                        exchange=exchange,
+                        interval="1m",
+                        start_date=current_start,
+                        end_date=current_end,
+                    )
                 )
-                if isinstance(df_chunk, pd.DataFrame) and not df_chunk.empty:
+                if not isinstance(df_chunk, pd.DataFrame):
+                    error_message = (
+                        df_chunk.get("message", "non-DataFrame response")
+                        if isinstance(df_chunk, dict)
+                        else f"unexpected response type {type(df_chunk).__name__}"
+                    )
+                    raise RuntimeError(
+                        f"OpenAlgo history request failed: {error_message}"
+                    )
+                if not df_chunk.empty:
                     all_chunks.append(df_chunk)
                 success = True
                 break
@@ -104,21 +124,22 @@ def download_stock_history_in_chunks(
                     "[%s] Chunk retry %d failed for %s to %s: %s",
                     ticker,
                     attempt + 1,
-                    start_date,
-                    end_date,
+                    current_start,
+                    current_end,
                     e,
                 )
-                import time
-
-                time.sleep(2)
+                if attempt + 1 < retries:
+                    sleep(2)
 
         if not success:
             logger.error(
-                "[%s] Failed chunk %s to %s after max retries.",
+                "[%s] Failed chunk %s to %s after %d attempts; aborting download.",
                 ticker,
-                start_date,
-                end_date,
+                current_start,
+                current_end,
+                retries,
             )
+            return None
 
         current_start = current_end + timedelta(days=1)
 
