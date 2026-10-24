@@ -68,11 +68,6 @@ class ModelManager:
         with self._lock:
             return self._models[model_name]
 
-    def save_model_to_memory(self, model_name: ModelName, model: ModelInstance) -> None:
-        """Store a loaded instance for use by inference and other callers."""
-        with self._lock:
-            self._models[model_name] = model
-
     def load_models(self, model_names: tuple[ModelName, ...] = MODEL_NAMES) -> bool:
         """Load selected checkpoints into memory; warn when a checkpoint is absent."""
         loaded_any = False
@@ -112,7 +107,7 @@ class ModelManager:
                         model.load_state_dict(state_dict)
                         model.eval()
 
-                    self.save_model_to_memory(model_name, model)
+                    self._models[model_name] = model
                     loaded_any = True
                     logger.info("Loaded %s model from disk.", model_name.upper())
                 except Exception:
