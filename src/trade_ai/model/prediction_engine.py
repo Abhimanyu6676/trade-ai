@@ -58,7 +58,7 @@ def predict(
         raw_lgb_pred = lgb_model.predict(latest_snapshot)
         pred_arr = np.asarray(raw_lgb_pred)
         if pred_arr.ndim > 0 and len(pred_arr) > 0:
-            lgb_probs = pred_arr[0]
+            lgb_probs = pred_arr[0] if pred_arr.ndim > 1 else pred_arr
 
     if isinstance(gru_model, GRUTradingBrain) and sequence_features is not None:
         with torch.inference_mode():
