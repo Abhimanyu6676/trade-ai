@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader, Dataset
 from trade_ai.model.models import GRU_MODEL_PATH, GRUTradingBrain
 from trade_ai.model.stock_metadata import STOCK_METADATA
 from trade_ai.openalgo.openalgo_client import TYPE_OPENALGO_EXCHANGE, openalgo
-from trade_ai.util import lowercase_ohlcv_columns
+from trade_ai.util import merge_ohlcv_history
 
 from ..features import (
     FEATURE_SCHEMA_VERSION,
@@ -125,9 +125,7 @@ def download_stock_history_in_chunks(
     if not all_chunks:
         return None
 
-    full_df = lowercase_ohlcv_columns(pd.concat(all_chunks).drop_duplicates())
-
-    return full_df.sort_values(by="timestamp").reset_index(drop=True)
+    return merge_ohlcv_history(pd.concat(all_chunks))
 
 
 def load_or_fetch_stock_data(ticker: str) -> pd.DataFrame | None:
@@ -137,7 +135,7 @@ def load_or_fetch_stock_data(ticker: str) -> pd.DataFrame | None:
 
     if os.path.exists(stock_csv):
         logger.info("[%s] Loading local dataset: %s", ticker, stock_csv)
-        return lowercase_ohlcv_columns(pd.read_csv(stock_csv))
+        return merge_ohlcv_history(pd.read_csv(stock_csv))
 
     logger.info("[%s] Local cache missing. Downloading historical data...", ticker)
     df = download_stock_history_in_chunks(ticker)

@@ -40,11 +40,6 @@ def _add_multi_timeframe_features(
     if ema_spans is None:
         ema_spans = DEFAULT_EMA_SPANS
 
-    # Section 1: Prepare sorted one-minute candles and their timeframe closes.
-    df = df.copy()
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
-    df = df.sort_values("timestamp").reset_index(drop=True)
-
     for tf in timeframes:
         # 1. Resample base data to target timeframe
         tf_df = resample_ohlcv(df, tf)
@@ -92,6 +87,11 @@ def compute_normalized_features(
     """Build return features, technical indicators, metadata, and optional labels."""
     df = lowercase_ohlcv_columns(df)
 
+    # Section 1: Prepare sorted one-minute candles and their timeframe closes.
+    df = df.copy()
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df = df.sort_values("timestamp").reset_index(drop=True)
+
     # Section 1: 1m, 5m, 15m Rate of Change features.
     df["ROC_1m"] = df["close"].pct_change(1)
     df["ROC_5m"] = df["close"].pct_change(5)
@@ -107,9 +107,7 @@ def compute_normalized_features(
     else:
         df = df.drop(
             columns=[
-                column
-                for column in METADATA_FEATURE_COLUMNS
-                if column in df.columns
+                column for column in METADATA_FEATURE_COLUMNS if column in df.columns
             ]
         )
         active_feature_columns = GRU_FEATURE_COLUMNS
