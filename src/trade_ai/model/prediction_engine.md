@@ -20,7 +20,7 @@ Implementation: `prediction_engine.py`. The engine forecasts one of the Triple B
 
 ## Current limitations
 
-- GRU training and app inference use the shared `DEFAULT_SEQUENCE_LENGTH` of 30 candles, defined in `training/sequence_loader.py`.
+- GRU training and app inference use the shared `DEFAULT_SEQUENCE_LENGTH` of 30 candles, defined in `training/gru_sequence_builder.py`.
 - Session grouping uses calendar date. It does not enforce exchange hours or exact one-minute timestamp continuity.
 - The 50/50 blend is fixed, and confidence values are not calibrated guarantees.
 - If the GRU lacks enough valid same-date rows but LightGBM is available, the result falls back to LightGBM alone.

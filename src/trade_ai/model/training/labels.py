@@ -10,6 +10,8 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
+MAX_HOLDING_PERIOD = 60
+
 
 def apply_triple_barrier(
     df: pd.DataFrame,
@@ -18,7 +20,7 @@ def apply_triple_barrier(
     atr_col: str = "ATR_14_1m",
     tp_multiplier: float = 2.0,
     sl_multiplier: float = 1.0,
-    max_holding_period: int = 60,
+    max_holding_period: int = MAX_HOLDING_PERIOD,
     start_hour: int = 10,
     start_minute: int = 0,
     end_hour: int = 14,

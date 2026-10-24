@@ -6,7 +6,7 @@ import pandas as pd
 
 from trade_ai.model.features import compute_normalized_features
 from trade_ai.model.prediction_engine import run_ai_prediction_inference
-from trade_ai.model.training.sequence_loader import DEFAULT_SEQUENCE_LENGTH
+from trade_ai.model.training.gru_sequence_builder import DEFAULT_SEQUENCE_LENGTH
 from trade_ai.openalgo.openalgo_client import TYPE_OPENALGO_EXCHANGE, openalgo
 from trade_ai.util import merge_ohlcv_history
 

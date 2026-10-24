@@ -55,8 +55,8 @@ trade-ai/
     │   ├── data_engine.py             # History fetch, feature warm-up, display, inference call
     │   ├── features.py                # Multi-timeframe model features
     │   ├── training/
-    │   │   ├── sequence_loader.py    # Same-calendar-date GRU sequence helpers
-    │   │   ├── sequence_loader.md    # Session and sequence boundary notes
+    │   │   ├── gru_sequence_builder.py     # Same-calendar-date GRU sequence helpers
+    │   │   ├── gru_sequence_builder.md    # Session and sequence boundary notes
     │   │   ├── labels.py              # Triple Barrier labels for training
     │   │   ├── train_lgb.py           # LightGBM data preparation and trainer
     │   │   ├── train_gru.py           # GRU training and session-safe dataset

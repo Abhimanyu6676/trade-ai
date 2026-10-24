@@ -45,7 +45,7 @@ def run_training(training_selection: TrainingSelection = "both") -> bool:
 
         if training_selection in ("gru", "both"):
             logger.info("Starting GRU training.")
-            train_gru_model(epochs=10)
+            train_gru_model(epochs=20)
             logger.info("GRU training completed.")
 
         training_succeeded = True

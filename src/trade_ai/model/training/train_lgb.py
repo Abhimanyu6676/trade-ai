@@ -7,7 +7,6 @@ from time import sleep
 
 import lightgbm as lgb
 import pandas as pd
-from sklearn.model_selection import train_test_split
 
 from trade_ai.model.models import LGB_MODEL_PATH, LGB_MODEL_SCHEMA_PATH
 from trade_ai.model.stock_metadata import STOCK_METADATA
@@ -19,7 +18,7 @@ from ..features import (
     LGB_MODEL_INPUT_COLUMNS,
     compute_normalized_features,
 )
-from .labels import apply_triple_barrier
+from .labels import MAX_HOLDING_PERIOD, apply_triple_barrier
 
 # Configure paths and logging
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -56,9 +55,7 @@ def download_stock_history_in_chunks(
     )
 
     while current_start <= end_date:
-        current_end = min(
-            current_start + timedelta(days=chunk_days - 1), end_date
-        )
+        current_end = min(current_start + timedelta(days=chunk_days - 1), end_date)
 
         success = False
         for attempt in range(retries):
@@ -138,14 +135,21 @@ def load_or_fetch_stock_data(ticker: str) -> pd.DataFrame | None:
     return None
 
 
-def prepare_training_data() -> tuple[pd.DataFrame, pd.Series]:
+def prepare_training_data() -> tuple[
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.Series,
+    pd.Series,
+]:
     """Iterates through all stocks, builds features and triple barrier labels,
 
-    drops warm-up/lookahead NaNs, and concatenates everything into a single
-    monolithic dataset for LightGBM.
+    splits each stock chronologically, purges the label look-ahead window, and
+    remaps classes to {0, 1, 2} for LightGBM.
     """
-    all_features = []
-    all_targets = []
+    all_train_features = []
+    all_val_features = []
+    all_train_targets = []
+    all_val_targets = []
 
     tickers = list(STOCK_METADATA.keys())
 
@@ -159,6 +163,9 @@ def prepare_training_data() -> tuple[pd.DataFrame, pd.Series]:
         # 1. Build multi-timeframe features
         df_feat = compute_normalized_features(raw_df, ticker, model_type="lgb")
 
+        # Reset to a positional index so the split purge is measured in candle rows.
+        df_feat = df_feat.reset_index(drop=True)
+
         # 3. Generate Triple Barrier target labels (-1, 0, 1) with time filters
         df_feat["target"] = apply_triple_barrier(
             df=df_feat,
@@ -167,14 +174,14 @@ def prepare_training_data() -> tuple[pd.DataFrame, pd.Series]:
             atr_col="ATR_14_1m",
             tp_multiplier=2.0,
             sl_multiplier=1.0,
-            max_holding_period=60,
+            max_holding_period=MAX_HOLDING_PERIOD,
             start_hour=10,
             start_minute=0,
             end_hour=14,
             end_minute=30,
         )
 
-        # 4. Drop rows with NaN targets (warm-up period + trading hour filters + end-of-file)
+        # 4. Drop rows with NaN targets
         df_clean = df_feat.dropna(subset=["target"]).copy()
         if df_clean.empty:
             logger.warning(
@@ -182,30 +189,63 @@ def prepare_training_data() -> tuple[pd.DataFrame, pd.Series]:
             )
             continue
 
-        # Select the canonical feature schema and target separately.
         feature_cols = list(LGB_MODEL_INPUT_COLUMNS)
 
-        all_features.append(df_clean[feature_cols])
-        # Remap Triple Barrier classes from {-1, 0, 1} to {0, 1, 2} for LightGBM multiclass objective
-        mapped_targets = df_clean["target"].astype(int) + 1
-        all_targets.append(mapped_targets)
+        # Use each ticker's own chronological boundary so validation includes all
+        # tickers instead of depending on their concatenation order.
+        split_idx = int(len(df_clean) * 0.8)
+        if split_idx == 0 or split_idx == len(df_clean):
+            logger.warning(
+                "Skipping %s: not enough labeled rows for both train and validation.",
+                ticker,
+            )
+            continue
 
-    if not all_features:
+        validation_start_row = int(df_clean.index[split_idx])
+        train_end_row = validation_start_row - MAX_HOLDING_PERIOD
+        train_df = df_clean.loc[df_clean.index < train_end_row]
+        val_df = df_clean.iloc[split_idx:]
+        if train_df.empty or val_df.empty:
+            logger.warning(
+                "Skipping %s: not enough rows after purging the %d-candle label "
+                "look-ahead window.",
+                ticker,
+                MAX_HOLDING_PERIOD,
+            )
+            continue
+
+        all_train_features.append(train_df[feature_cols])
+        all_val_features.append(val_df[feature_cols])
+        all_train_targets.append(train_df["target"].astype(int) + 1)
+        all_val_targets.append(val_df["target"].astype(int) + 1)
+
+    if not all_train_features:
         raise RuntimeError(
             "Training aborted: No valid data processed across any ticker."
         )
 
-    # Concatenate all stocks into a single monolithic matrix for LightGBM
-    X_master = pd.concat(all_features, ignore_index=True)
-    y_master = pd.concat(all_targets, ignore_index=True)
+    # Concatenate per-stock chronological horizons into global master sets
+    X_train = pd.concat(all_train_features, ignore_index=True)
+    X_val = pd.concat(all_val_features, ignore_index=True)
+    y_train = pd.concat(all_train_targets, ignore_index=True)
+    y_val = pd.concat(all_val_targets, ignore_index=True)
+
+    if X_train.empty or X_val.empty:
+        raise RuntimeError(
+            "Training aborted: the combined train or validation set is empty."
+        )
 
     logger.info(
-        "Master training dataset assembled successfully. Total rows across all"
-        " stocks: %d, Features: %d",
-        len(X_master),
-        X_master.shape[1],
+        "Master training datasets assembled successfully via per-ticker timeline splits."
     )
-    return X_master, y_master
+    logger.info(
+        "Train rows: %d, Val rows: %d, Features: %d",
+        len(X_train),
+        len(X_val),
+        X_train.shape[1],
+    )
+
+    return X_train, X_val, y_train, y_val
 
 
 def train_lightgbm_model():
@@ -214,11 +254,24 @@ def train_lightgbm_model():
     os.makedirs(CACHE_DIR, exist_ok=True)
 
     logger.info("🚀 Initializing LightGBM Training Pipeline...")
-    X, y = prepare_training_data()
 
-    # Chronological or stratified split (using train_test_split with shuffle=False for time series integrity)
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=0.2, shuffle=False
+    X_train, X_val, y_train, y_val = prepare_training_data()
+
+    def class_counts(targets: pd.Series) -> dict[int, int]:
+        return {
+            -1: int((targets == 0).sum()),
+            0: int((targets == 1).sum()),
+            1: int((targets == 2).sum()),
+        }
+
+    logger.info(
+        "LightGBM dataset summary: train_rows=%d val_rows=%d features=%d "
+        "train_classes=%s val_classes=%s",
+        len(X_train),
+        len(X_val),
+        X_train.shape[1],
+        class_counts(y_train),
+        class_counts(y_val),
     )
 
     train_data = lgb.Dataset(X_train, label=y_train)
@@ -238,29 +291,46 @@ def train_lightgbm_model():
     }
 
     logger.info("Training LightGBM model across %d estimators...", 500)
+
     model = lgb.train(
         params,
         train_data,
         num_boost_round=500,
         valid_sets=[train_data, val_data],
+        valid_names=["train", "validation"],
         callbacks=[
             lgb.early_stopping(stopping_rounds=50),
             lgb.log_evaluation(period=50),
         ],
     )
 
-    # Save trained model to disk
-    model.save_model(LGB_MODEL_PATH)
-    with open(LGB_MODEL_SCHEMA_PATH, "w", encoding="utf-8") as schema_file:
-        json.dump(
-            {
-                "feature_schema_version": FEATURE_SCHEMA_VERSION,
-                "feature_columns": list(LGB_MODEL_INPUT_COLUMNS),
-            },
-            schema_file,
-            indent=2,
-        )
+    train_scores = model.best_score.get("train", {})
+    validation_scores = model.best_score.get("validation", {})
     logger.info(
-        "✅ LightGBM training complete! Model weights saved to: %s", LGB_MODEL_PATH
+        "LightGBM training summary: best_iteration=%d train_multi_logloss=%s "
+        "validation_multi_logloss=%s",
+        model.best_iteration,
+        f"{train_scores['multi_logloss']:.5f}"
+        if "multi_logloss" in train_scores
+        else "unavailable",
+        f"{validation_scores['multi_logloss']:.5f}"
+        if "multi_logloss" in validation_scores
+        else "unavailable",
+    )
+
+    model.save_model(LGB_MODEL_PATH)
+    logger.info("Saved trained LightGBM model artifact to %s", LGB_MODEL_PATH)
+
+    # Save schema mapping details
+    schema = {
+        "feature_schema_version": FEATURE_SCHEMA_VERSION,
+        "feature_columns": list(LGB_MODEL_INPUT_COLUMNS),
+        "objective": "multiclass",
+        "class_mapping": {0: -1, 1: 0, 2: 1},
+    }
+    with open(LGB_MODEL_SCHEMA_PATH, "w", encoding="utf-8") as schema_file:
+        json.dump(schema, schema_file, indent=4)
+    logger.info(
+        "Saved LightGBM model schema configuration to %s", LGB_MODEL_SCHEMA_PATH
     )
     return model

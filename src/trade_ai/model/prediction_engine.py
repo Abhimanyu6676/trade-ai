@@ -15,7 +15,10 @@ from .features import (
     compute_normalized_features,
 )
 from .models import GRUTradingBrain, get_model_manager
-from .training.sequence_loader import DEFAULT_SEQUENCE_LENGTH, latest_session_sequence
+from .training.gru_sequence_builder import (
+    DEFAULT_SEQUENCE_LENGTH,
+    latest_session_sequence,
+)
 
 logger = logging.getLogger(__name__)
 

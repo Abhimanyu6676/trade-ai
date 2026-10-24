@@ -1,6 +1,6 @@
 # Session-Safe GRU Sequences
 
-Implementation: `sequence_loader.py`, used by `train_gru.py` and `../prediction_engine.py`.
+Implementation: `gru_sequence_builder.py`, used by `train_gru.py` and `../prediction_engine.py`.
 
 The shared `DEFAULT_SEQUENCE_LENGTH` is 30 candles and is used by both GRU training and app inference.
 
@@ -18,4 +18,4 @@ Features are calculated on the full chronological history before sequence select
 
 ## Boundaries
 
-“Session” currently means calendar date from the candle timestamp. The sequence loader does not check exchange market hours, missing minutes, or whether all rows are exactly one minute apart. Triple Barrier labels separately use a 15:15 market-close cutoff by default; candle-open time 15:14 is eligible and 15:15 is excluded.
+“Session” currently means calendar date from the candle timestamp. The sequence builder does not check exchange market hours, missing minutes, or whether all rows are exactly one minute apart. Triple Barrier labels separately use a 15:15 market-close cutoff by default; candle-open time 15:14 is eligible and 15:15 is excluded.
