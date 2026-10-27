@@ -6,6 +6,10 @@ Last reviewed: 2026-10-24.
 
 `trade-ai` is a Python application for market-data forecasts. It trains a LightGBM classifier and a PyTorch GRU classifier on three Triple Barrier outcomes. FastAPI exposes structured prediction requests, OpenAlgo history, and analyser status. It does not submit broker orders.
 
+## Logging
+
+`src/trade_ai/logger.py` configures the shared `trade_ai` logger at INFO level with timestamp, severity, and message fields. Application modules import this shared logger instead of creating module-specific loggers. Python's `logging.basicConfig()` leaves an existing host application's logging configuration in place.
+
 The market-analysis path is:
 
 1. `app.py` initializes the model manager, which loads available checkpoints, then starts Uvicorn in the main process. FastAPI prediction requests call the async data engine directly.
@@ -47,6 +51,7 @@ The market-analysis path is:
 
 ## Structured Brain API
 
+- `GET /api/event/test` accepts `ticker` and optional `exchange` query parameters. `exchange` defaults to `NSE`; the route returns the trimmed, uppercased ticker in a `SERVER/SERVER_STATUS` response.
 - `POST /api/brain/predict` accepts explicit `ticker`, `exchange`, `days_back`, and `interval` fields. Exchange is `NSE` or `BSE`; the current inference pipeline accepts `1m` only.
 - It can use either OpenAlgo history (`days_back`) or caller-supplied `candles` containing timestamp and lowercase OHLCV fields. The supplied array is limited to 25,000 rows and is validated before inference.
 - The route returns a `MODEL/PREDICTION` envelope. Its response data contains the signal, confidence, and processed candle count; errors are strings in `data.error`.
@@ -55,6 +60,7 @@ The market-analysis path is:
 ## Source Map
 
 - `src/trade_ai/app.py`: initializes the model manager and runs the API in the main process.
+- `src/trade_ai/logger.py`: configures and exports the shared project logger.
 - `src/trade_ai/model/data_engine.py`: OpenAlgo market-history fetch, warm-up buffer, feature display, inference call.
 - `src/trade_ai/model/features.py` and `src/trade_ai/model/training/gru_sequence_builder.py`: feature schema and same-session GRU windows.
 - `src/trade_ai/model/training/labels.py`: Triple Barrier target generation used by both trainers.
@@ -65,6 +71,7 @@ The market-analysis path is:
 - The OpenAlgo SDK's `analyzerstatus()` method is synchronous; call it without `await` and normalize its dictionary response in `OpenAlgo.get_analyzer_status()`.
 - `src/trade_ai/indicator/`: indicator calculations and their explanatory Markdown files.
 - `src/trade_ai/server/`: FastAPI application, `predict_route.py` prediction route, and `openalgo_route.py` history and analyser status routes.
+- `src/trade_ai/server/event_route.py`: event test route and its ticker/exchange query model.
 - `src/trade_ai/server/serverTypes.py`: generic `UniversalServerResponse` envelope and response-data wrapper.
 - `src/trade_ai/model/modelTypes.py`, `src/trade_ai/openalgo/openalgoTypes.py`, and `src/trade_ai/universalTypes.py`: internal domain/request types, event literals, and global intent/event literals. `modelTypes.py` owns the `ModelName` literal and `MODEL_NAMES` tuple; `openalgoTypes.py` owns OHLCV candle data and the validated prediction candle request model. Routes and model code import these module types when needed.
 

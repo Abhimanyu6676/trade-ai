@@ -48,6 +48,7 @@ trade-ai/
 └── src/trade_ai/
     ├── __init__.py                   # Package entry point
     ├── app.py                        # Loads prediction models and starts the API
+    ├── logger.py                     # Shared project logging configuration
     ├── openalgo/                     # OpenAlgo client, types, and conversion helpers
     ├── util.py                       # OHLCV ordering, merge, and resampling helpers
     ├── model/

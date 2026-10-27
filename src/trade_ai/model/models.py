@@ -1,7 +1,6 @@
 """Own the in-memory LightGBM and GRU model instances and their lifecycle."""
 
 import json
-import logging
 import os
 import shutil
 import threading
@@ -11,6 +10,7 @@ import lightgbm as lgb
 import torch
 from torch import nn
 
+from trade_ai.logger import logger
 from trade_ai.model.features import (
     FEATURE_SCHEMA_VERSION,
     GRU_MODEL_INPUT_COLUMNS,
@@ -27,9 +27,6 @@ LGB_MODEL_SCHEMA_PATH = f"{LGB_MODEL_PATH}.schema.json"
 GRU_MODEL_PATH = os.path.join(
     CACHE_DIR, f"gru_trading_model_v{FEATURE_SCHEMA_VERSION}.pth"
 )
-
-logger = logging.getLogger(__name__)
-
 
 class GRUTradingBrain(nn.Module):
     """Two-layer GRU architecture with dropout and a linear classification head."""

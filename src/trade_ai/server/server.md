@@ -23,6 +23,7 @@ The server binds to `0.0.0.0`. Browser origins are controlled by
 | Method | Path | Description | Response |
 | --- | --- | --- | --- |
 | `GET` | `/` | Basic API availability check (`SERVER/SERVER_STATUS`). | `{"intent":"SERVER","data":{"eventType":"SERVER_STATUS","data":{"service":"trade-ai","status":"online"},"error":null}}` |
+| `GET` | `/api/event/test` | Validate event request query parameters and return the normalized ticker (`SERVER/SERVER_STATUS`). | `{"intent":"SERVER","data":{"eventType":"SERVER_STATUS","data":{"ticker":"WIPRO"},"error":null}}` |
 | `POST` | `/api/brain/predict` | Run prediction using supplied candles or fetch history (`MODEL/PREDICTION`). | `{"intent":"MODEL","data":{"eventType":"PREDICTION","data":{"ticker":"WIPRO","exchange":"BSE","days_back":null,"interval":"1m","signal":1,"confidence":0.82,"candles_processed":420},"error":null}}` |
 | `POST` | `/api/openalgo/history` | Fetch broker history through the OpenAlgo Python client (`OPENALGO/HISTORY`). | `{"intent":"OPENALGO","data":{"eventType":"HISTORY","data":{"symbol":"WIPRO","exchange":"BSE","interval":"1m","candles":[{"timestamp":1790842500,"open":1510.5,"high":1512.0,"low":1509.0,"close":1511.5,"volume":1200,"oi":null}]},"error":null}}` |
 | `GET` | `/api/openalgo/analyser-status` | Fetch OpenAlgo analyser status (`OPENALGO/ANALYSER_STATUS`). | `{"intent":"OPENALGO","data":{"eventType":"ANALYSER_STATUS","data":{"available":true,"mode":"live","analyze_mode":true,"message":"OpenAlgo analyser is online."},"error":null}}` |
@@ -73,6 +74,13 @@ and history candle conversion plus JSON encoding are offloaded; the health
 check only performs small in-memory response construction. Error handlers
 encode the typed response envelope into JSON-compatible values before building
 `JSONResponse` objects.
+
+### Event test
+
+`GET /api/event/test` accepts `ticker` and an optional `exchange` query
+parameter. `ticker` must contain 1–32 non-blank characters and is returned
+trimmed and uppercased. `exchange` accepts `NSE` or `BSE` and defaults to
+`NSE`. For example: `/api/event/test?ticker=WIPRO&exchange=BSE`.
 
 ### OpenAlgo history
 

@@ -81,7 +81,7 @@ Start the brain runtime and FastAPI server on port 3010:
 uv run python src/trade_ai/app.py
 ```
 
-For development, Run:
+For development (Auto restart using nodemon), Run:
 
 ```sh
 nodemon --watch . --ext py --exec "uv run python src/trade_ai/app.py"
@@ -91,6 +91,12 @@ OR run from project root, as we have setup `nodemon.json`
 
 ```sh
 nodemon
+```
+
+OR, use the following for hot reloading
+
+```sh
+uv run jurigged --watch src/ -v src/trade_ai/app.py
 ```
 
 The app loads the prediction models, then runs FastAPI/Uvicorn in the main

@@ -1,13 +1,12 @@
 """Generate predictions using model instances managed by ``models.py``."""
 
-import logging
-
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
 import torch
 
 from trade_ai.util import merge_ohlcv_history
+from trade_ai.logger import logger
 
 from .features import (
     GRU_MODEL_INPUT_COLUMNS,
@@ -19,9 +18,6 @@ from .training.gru_sequence_builder import (
     DEFAULT_SEQUENCE_LENGTH,
     latest_session_sequence,
 )
-
-logger = logging.getLogger(__name__)
-
 
 def predict(
     raw_df: pd.DataFrame,

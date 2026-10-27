@@ -1,7 +1,6 @@
 """OpenAlgo client lifecycle and API operations."""
 
 import asyncio
-import logging
 import os
 from datetime import date
 from typing import Any, Literal, TypedDict
@@ -9,18 +8,13 @@ from typing import Any, Literal, TypedDict
 import pandas as pd
 from openalgo import api
 
+from trade_ai.logger import logger
 from trade_ai.util import lowercase_ohlcv_columns
 
 from .openalgoTypes import (
     TYPE_OPENALGO_EXCHANGE,
     TYPE_OPENALGO_INTERVALS,
     get_analyser_status_response,
-)
-
-# Configure module-level logger
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
 DEFAULT_OPENALGO_HOST = "https://openalgo-1.sternetsmart.com"

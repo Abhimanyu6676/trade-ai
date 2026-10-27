@@ -1,7 +1,6 @@
 """OpenAlgo history and analyser status endpoints for browser clients."""
 
 import asyncio
-import logging
 from dataclasses import dataclass
 from datetime import date
 from typing import Literal
@@ -12,6 +11,7 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, model_validator
 from starlette.responses import JSONResponse
 
+from trade_ai.logger import logger
 from trade_ai.openalgo.helper import convert_OHLCV_dfToArray
 from trade_ai.openalgo.openalgo_client import openalgo
 from trade_ai.openalgo.openalgoTypes import (
@@ -22,12 +22,6 @@ from trade_ai.openalgo.openalgoTypes import (
 from trade_ai.server.serverTypes import (
     UniversalServerResponse,
     serverDataType,
-)
-
-# Configure module-level logger
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
 router = APIRouter()

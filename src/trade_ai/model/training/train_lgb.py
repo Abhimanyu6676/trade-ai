@@ -1,6 +1,5 @@
 import asyncio
 import json
-import logging
 import os
 from datetime import date, timedelta
 from time import sleep
@@ -8,6 +7,7 @@ from time import sleep
 import lightgbm as lgb
 import pandas as pd
 
+from trade_ai.logger import logger
 from trade_ai.model.models import LGB_MODEL_PATH, LGB_MODEL_SCHEMA_PATH
 from trade_ai.model.stock_metadata import STOCK_METADATA
 from trade_ai.openalgo.openalgo_client import TYPE_OPENALGO_EXCHANGE, openalgo
@@ -20,16 +20,10 @@ from ..features import (
 )
 from .labels import MAX_HOLDING_PERIOD, apply_triple_barrier
 
-# Configure paths and logging
+# Configure training paths
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 TICK_DATA_DIR = os.path.join(BASE_DIR, "tickData")
 CACHE_DIR = os.path.join(BASE_DIR, ".run_cache")
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
-
 
 def download_stock_history_in_chunks(
     ticker: str,

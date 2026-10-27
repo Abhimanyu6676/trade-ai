@@ -11,6 +11,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from trade_ai.server.event_route import (
+    router as event_router,
+)
 from trade_ai.server.openalgo_route import (
     AnalyserStatusServerResponse,
     HistoryServerResponse,
@@ -49,6 +52,7 @@ server_app.add_middleware(
 )
 server_app.include_router(predict_router, prefix="/api/brain")
 server_app.include_router(openalgo_router, prefix="/api/openalgo")
+server_app.include_router(event_router, prefix="/api/event")
 
 
 def _error_response(path: str, message: str) -> Any:
@@ -93,9 +97,7 @@ async def handle_request_validation_error(
 async def handle_http_error(request: Request, error: HTTPException) -> JSONResponse:
     return JSONResponse(
         status_code=error.status_code,
-        content=jsonable_encoder(
-            _error_response(request.url.path, str(error.detail))
-        ),
+        content=jsonable_encoder(_error_response(request.url.path, str(error.detail))),
         headers=error.headers,
     )
 

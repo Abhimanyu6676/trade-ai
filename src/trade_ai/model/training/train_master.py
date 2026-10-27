@@ -1,20 +1,15 @@
 """Select and coordinate training runs for the model training modules."""
 
 import argparse
-import logging
 import threading
 from typing import Literal
 
+from trade_ai.logger import logger
 from trade_ai.model.models import get_model_manager
 from trade_ai.model.modelTypes import ModelName
 
 from .train_gru import train_gru_model
 from .train_lgb import train_lightgbm_model
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
 
 TrainingSelection = Literal["gru", "lgb", "both"]
 TRAINING_MODELS: dict[TrainingSelection, tuple[ModelName, ...]] = {

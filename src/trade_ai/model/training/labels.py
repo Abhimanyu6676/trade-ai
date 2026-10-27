@@ -1,14 +1,9 @@
-import logging
 from datetime import time
 
 import numpy as np
 import pandas as pd
 
-# Configure module-level logger
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+from trade_ai.logger import logger
 
 MAX_HOLDING_PERIOD = 60
 
