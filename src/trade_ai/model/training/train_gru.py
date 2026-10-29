@@ -37,7 +37,7 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 TICK_DATA_DIR = os.path.join(os.path.dirname(__file__), "tickData")
 CACHE_DIR = os.path.join(BASE_DIR, ".run_cache")
 
-MIN_EPOCHS = 10
+MIN_EPOCHS = 5
 MAX_EPOCHS = 20
 EARLY_STOPPING_PATIENCE = 3
 
@@ -218,11 +218,10 @@ def _prepare_ticker_datasets(
     # Keep unlabeled rows as sequence context, while splitting labeled endpoints.
     df_clean = df_feat.dropna(subset=["timestamp"]).copy()
     features_np = df_clean[feature_cols].to_numpy(dtype=np.float32)
-    targets_np = pd.to_numeric(df_clean["target"], errors="coerce").to_numpy(
-        dtype=np.float32
-    )
+    targets_series = pd.to_numeric(df_clean["target"], errors="coerce")
+    targets_np = np.asarray(targets_series, dtype=np.float32)
     dates_np = session_dates(df_clean["timestamp"])
-    labeled_indices = np.flatnonzero(np.isfinite(targets_np))
+    labeled_indices = np.where(np.isfinite(targets_np))[0]
     split_idx = int(len(labeled_indices) * 0.8)
     if split_idx == 0 or split_idx == len(labeled_indices):
         logger.warning(
@@ -327,9 +326,7 @@ def train_gru_model(
 
     # Feature and label preparation is deterministic for a given history. Keep
     # each ticker's datasets in memory so every epoch only performs GRU work.
-    prepared_datasets: dict[
-        str, tuple[SlidingWindowDataset, SlidingWindowDataset]
-    ] = {}
+    prepared_datasets: dict[str, tuple[SlidingWindowDataset, SlidingWindowDataset]] = {}
     for ticker in tickers:
         logger.info("Preparing GRU datasets for %s...", ticker)
         datasets = _prepare_ticker_datasets(

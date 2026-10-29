@@ -43,8 +43,8 @@ trains LightGBM first and GRU second.
    sequence counts, and the initial split's class counts, plus aggregate epoch
    metrics. Each ticker's features, labels, splits, and windows are prepared once
    and retained in memory for reuse across epochs; validation runs one ticker at
-   a time. GRU accepts an epoch limit from 10 through 20; it always trains at
-   least 10 epochs, then stops if validation loss has not improved for 3
+   a time. GRU accepts an epoch limit from 5 through 20; it always trains at
+   least 5 epochs, then stops if validation loss has not improved for 3
    consecutive epochs, or at the 20-epoch limit. It saves the checkpoint with
    the best validation loss. The checkpoint includes the feature schema version
    and ordered input-column names. Each trainer selects its model-specific
@@ -59,7 +59,7 @@ trains LightGBM first and GRU second.
    restarts. A schema mismatch during a successful run still leaves that model
    unloaded and requires retraining.
 
-The default GRU run allows up to 20 epochs, with a minimum of 10, uses 30
+The default GRU run allows up to 20 epochs, with a minimum of 5, uses 30
 candles per sequence, and batches of 256. Early stopping uses a patience of 3
 epochs after the minimum training period.
 Checkpoint files are under `src/trade_ai/model/.run_cache/`:
