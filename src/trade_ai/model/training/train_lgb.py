@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from time import sleep
 
 import lightgbm as lgb
+import numpy as np
 import pandas as pd
 
 from trade_ai.logger import logger
@@ -18,17 +19,23 @@ from ..features import (
     LGB_MODEL_INPUT_COLUMNS,
     compute_normalized_features,
 )
-from .labels import MAX_HOLDING_PERIOD, apply_triple_barrier
+from .labels import (
+    LABEL_SCHEMA_VERSION,
+    MAX_HOLDING_PERIOD,
+    add_absolute_label_atr,
+    apply_triple_barrier,
+)
 
 # Configure training paths
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-TICK_DATA_DIR = os.path.join(BASE_DIR, "tickData")
+TICK_DATA_DIR = os.path.join(os.path.dirname(__file__), "tickData")
 CACHE_DIR = os.path.join(BASE_DIR, ".run_cache")
+
 
 def download_stock_history_in_chunks(
     ticker: str,
     exchange: TYPE_OPENALGO_EXCHANGE = "NSE",
-    start_date: date = date(2020, 1, 1),
+    start_date: date = date(2021, 11, 1),
     end_date: date = date(2026, 7, 31),
     chunk_days: int = 30,
     retries: int = 3,
@@ -156,6 +163,7 @@ def prepare_training_data() -> tuple[
 
         # 1. Build multi-timeframe features
         df_feat = compute_normalized_features(raw_df, ticker, model_type="lgb")
+        df_feat = add_absolute_label_atr(df_feat, raw_df)
 
         # Reset to a positional index so the split purge is measured in candle rows.
         df_feat = df_feat.reset_index(drop=True)
@@ -165,7 +173,7 @@ def prepare_training_data() -> tuple[
             df=df_feat,
             timestamp_col="timestamp",
             close_col="close",
-            atr_col="ATR_14_1m",
+            atr_col="ATR_14_1m_absolute",
             tp_multiplier=2.0,
             sl_multiplier=1.0,
             max_holding_period=MAX_HOLDING_PERIOD,
@@ -242,7 +250,7 @@ def prepare_training_data() -> tuple[
     return X_train, X_val, y_train, y_val
 
 
-def train_lightgbm_model():
+def train_lightgbm_model() -> bool:
     """Trains the LightGBM model on the concatenated master dataset and saves artifacts."""
     openalgo.initiate()
     os.makedirs(CACHE_DIR, exist_ok=True)
@@ -312,19 +320,62 @@ def train_lightgbm_model():
         else "unavailable",
     )
 
+    validation_logloss = validation_scores.get("multi_logloss")
+    train_class_priors = (
+        y_train.value_counts(normalize=True)
+        .reindex(range(3), fill_value=0.0)
+        .to_numpy(dtype=float)
+    )
+    validation_labels = y_val.to_numpy(dtype=np.int64)
+    baseline_validation_logloss = float(
+        -np.log(
+            np.clip(train_class_priors[validation_labels], 1e-15, 1.0)
+        ).mean()
+    )
+    logger.info(
+        "Class-prior baseline validation_multi_logloss=%.5f; "
+        "model validation_multi_logloss=%s",
+        baseline_validation_logloss,
+        (
+            f"{validation_logloss:.5f}"
+            if validation_logloss is not None
+            else "unavailable"
+        ),
+    )
+
+    if validation_logloss is None or validation_logloss >= baseline_validation_logloss:
+        logger.warning(
+            "LightGBM did not beat the class-prior validation baseline; "
+            "not replacing the existing checkpoint."
+        )
+        return False
+
     model.save_model(LGB_MODEL_PATH)
     logger.info("Saved trained LightGBM model artifact to %s", LGB_MODEL_PATH)
 
     # Save schema mapping details
     schema = {
         "feature_schema_version": FEATURE_SCHEMA_VERSION,
+        "label_schema_version": LABEL_SCHEMA_VERSION,
         "feature_columns": list(LGB_MODEL_INPUT_COLUMNS),
         "objective": "multiclass",
         "class_mapping": {0: -1, 1: 0, 2: 1},
+        "best_iteration": int(model.best_iteration),
+        "train_multi_logloss": (
+            float(train_scores["multi_logloss"])
+            if "multi_logloss" in train_scores
+            else None
+        ),
+        "validation_multi_logloss": (
+            float(validation_scores["multi_logloss"])
+            if "multi_logloss" in validation_scores
+            else None
+        ),
+        "class_prior_validation_multi_logloss": baseline_validation_logloss,
     }
     with open(LGB_MODEL_SCHEMA_PATH, "w", encoding="utf-8") as schema_file:
         json.dump(schema, schema_file, indent=4)
     logger.info(
         "Saved LightGBM model schema configuration to %s", LGB_MODEL_SCHEMA_PATH
     )
-    return model
+    return True

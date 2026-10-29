@@ -35,8 +35,13 @@ def run_training(training_selection: TrainingSelection = "both") -> bool:
     try:
         if training_selection in ("lgb", "both"):
             logger.info("Starting LightGBM training.")
-            train_lightgbm_model()
-            logger.info("LightGBM training completed.")
+            if train_lightgbm_model():
+                logger.info("LightGBM training completed and saved a checkpoint.")
+            else:
+                logger.warning(
+                    "LightGBM training did not beat the validation baseline; "
+                    "the checkpoint was not replaced."
+                )
 
         if training_selection in ("gru", "both"):
             logger.info("Starting GRU training.")

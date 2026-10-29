@@ -17,6 +17,7 @@ from trade_ai.model.features import (
     LGB_MODEL_INPUT_COLUMNS,
 )
 from trade_ai.model.modelTypes import MODEL_NAMES, ModelName
+from trade_ai.model.training.labels import LABEL_SCHEMA_VERSION
 
 BASE_DIR = os.path.dirname(__file__)
 CACHE_DIR = os.path.join(BASE_DIR, ".run_cache")
@@ -147,6 +148,11 @@ class ModelManager:
         if checkpoint.get("feature_schema_version") != FEATURE_SCHEMA_VERSION:
             raise ValueError(
                 f"{model_name.upper()} checkpoint feature schema version is incompatible"
+            )
+        if checkpoint.get("label_schema_version") != LABEL_SCHEMA_VERSION:
+            raise ValueError(
+                f"{model_name.upper()} checkpoint label schema version is incompatible; "
+                "retrain it"
             )
         expected_columns = (
             GRU_MODEL_INPUT_COLUMNS if model_name == "gru" else LGB_MODEL_INPUT_COLUMNS

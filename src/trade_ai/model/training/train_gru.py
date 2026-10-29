@@ -25,11 +25,16 @@ from .gru_sequence_builder import (
     session_dates,
     valid_window_starts,
 )
-from .labels import MAX_HOLDING_PERIOD, apply_triple_barrier
+from .labels import (
+    LABEL_SCHEMA_VERSION,
+    MAX_HOLDING_PERIOD,
+    add_absolute_label_atr,
+    apply_triple_barrier,
+)
 
 # Directory and path configurations
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-TICK_DATA_DIR = os.path.join(BASE_DIR, "tickData")
+TICK_DATA_DIR = os.path.join(os.path.dirname(__file__), "tickData")
 CACHE_DIR = os.path.join(BASE_DIR, ".run_cache")
 
 MIN_EPOCHS = 10
@@ -90,7 +95,7 @@ class SlidingWindowDataset(Dataset):
 def download_stock_history_in_chunks(
     ticker: str,
     exchange: TYPE_OPENALGO_EXCHANGE = "NSE",
-    start_date: date = date(2020, 1, 1),
+    start_date: date = date(2021, 11, 1),
     end_date: date = date(2026, 7, 31),
     chunk_days: int = 30,
     retries: int = 3,
@@ -194,12 +199,13 @@ def _prepare_ticker_datasets(
         return None
 
     df_feat = compute_normalized_features(raw_df, ticker, model_type="gru")
+    df_feat = add_absolute_label_atr(df_feat, raw_df)
     df_feat = df_feat.reset_index(drop=True)
     df_feat["target"] = apply_triple_barrier(
         df=df_feat,
         timestamp_col="timestamp",
         close_col="close",
-        atr_col="ATR_14_1m",
+        atr_col="ATR_14_1m_absolute",
         tp_multiplier=2.0,
         sl_multiplier=1.0,
         max_holding_period=MAX_HOLDING_PERIOD,
@@ -319,6 +325,29 @@ def train_gru_model(
     best_epoch = 0
     criterion = nn.CrossEntropyLoss()
 
+    # Feature and label preparation is deterministic for a given history. Keep
+    # each ticker's datasets in memory so every epoch only performs GRU work.
+    prepared_datasets: dict[
+        str, tuple[SlidingWindowDataset, SlidingWindowDataset]
+    ] = {}
+    for ticker in tickers:
+        logger.info("Preparing GRU datasets for %s...", ticker)
+        datasets = _prepare_ticker_datasets(
+            ticker, feature_cols, sequence_length, log_split=True
+        )
+        if datasets is not None:
+            prepared_datasets[ticker] = datasets
+
+    if not prepared_datasets:
+        raise RuntimeError(
+            "No valid GRU training and validation datasets were prepared."
+        )
+    logger.info(
+        "Prepared GRU datasets for %d/%d tickers; reusing them across epochs.",
+        len(prepared_datasets),
+        len(tickers),
+    )
+
     for epoch in range(epochs):
         logger.info("--- Starting Epoch %d/%d ---", epoch + 1, epochs)
         train_loss_sum = 0.0
@@ -326,9 +355,7 @@ def train_gru_model(
         train_samples = 0
 
         for ticker in tickers:
-            datasets = _prepare_ticker_datasets(
-                ticker, feature_cols, sequence_length, log_split=(epoch == 0)
-            )
+            datasets = prepared_datasets.get(ticker)
             if datasets is None:
                 continue
             train_dataset, _ = datasets
@@ -367,17 +394,16 @@ def train_gru_model(
                 ticker_correct / ticker_samples,
                 ticker_samples,
             )
-            del train_dataset, datasets
 
         if train_samples == 0:
             raise RuntimeError(f"No valid GRU training sequences in epoch {epoch + 1}.")
 
-        # Rebuild validation one ticker at a time to keep peak memory bounded.
+        # Evaluate one ticker at a time using its cached validation dataset.
         val_loss_sum = 0.0
         val_correct = 0
         val_samples = 0
         for ticker in tickers:
-            datasets = _prepare_ticker_datasets(ticker, feature_cols, sequence_length)
+            datasets = prepared_datasets.get(ticker)
             if datasets is None:
                 continue
             _, val_dataset = datasets
@@ -399,7 +425,6 @@ def train_gru_model(
                 ticker_val_correct / ticker_val_samples,
                 ticker_val_samples,
             )
-            del val_dataset, datasets
 
         if val_samples == 0:
             raise RuntimeError("No valid GRU validation sequences were available.")
@@ -427,6 +452,7 @@ def train_gru_model(
             torch.save(
                 {
                     "feature_schema_version": FEATURE_SCHEMA_VERSION,
+                    "label_schema_version": LABEL_SCHEMA_VERSION,
                     "feature_columns": feature_cols,
                     "state_dict": model.state_dict(),
                 },

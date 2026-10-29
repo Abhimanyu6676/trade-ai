@@ -4,6 +4,7 @@ from typing import Any
 
 import pandas as pd
 
+from trade_ai.logger import logger
 from trade_ai.model.features import compute_normalized_features
 from trade_ai.model.prediction_engine import run_ai_prediction_inference
 from trade_ai.model.training.gru_sequence_builder import DEFAULT_SEQUENCE_LENGTH
@@ -38,8 +39,13 @@ async def fetch_and_clean_candles(
     )
 
     try:
-        print(
-            f"[SDK Call] Requesting {exchange}:{ticker} ({interval}) from {history_start_date} to {end_date} via Data Engine..."
+        logger.info(
+            "[SDK Call] Requesting %s:%s (%s) from %s to %s via Data Engine...",
+            exchange,
+            ticker,
+            interval,
+            history_start_date,
+            end_date,
         )
         df = await openalgo.get_history(
             symbol=ticker,
@@ -57,7 +63,7 @@ async def fetch_and_clean_candles(
         )
 
     except Exception as e:
-        print(f"[Data Engine Exception]: {e}")
+        logger.error("[Data Engine Exception]: %s", e)
         return None, f"Execution Failure: {e!s}", 0.0
 
 
@@ -70,8 +76,10 @@ def _process_fetched_candles(
 
     # Keep enough rows for warm-up without unbounded feature-generation cost.
     if len(df) > MAX_ALLOWED_ROWS:
-        print(
-            f"⚠️ Trimming historical rows from {len(df)} down to {MAX_ALLOWED_ROWS} max limit."
+        logger.warning(
+            "⚠️ Trimming historical rows from %s down to %s max limit.",
+            len(df),
+            MAX_ALLOWED_ROWS,
         )
         df = df.tail(MAX_ALLOWED_ROWS).reset_index(drop=True)
 

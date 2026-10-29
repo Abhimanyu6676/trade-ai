@@ -34,9 +34,18 @@ def merge_ohlcv_history(
     if not frames:
         return lowercase_ohlcv_columns(history_df.iloc[0:0])
 
-    combined = lowercase_ohlcv_columns(pd.concat(frames, ignore_index=True))
+    combined = lowercase_ohlcv_columns(pd.concat(frames))
     if "timestamp" not in combined.columns:
-        raise ValueError("OHLCV data must include a timestamp column")
+        index_name = str(combined.index.name).casefold() if combined.index.name else ""
+        if isinstance(combined.index, pd.DatetimeIndex) or index_name in {
+            "timestamp",
+            "datetime",
+            "date",
+            "time",
+        }:
+            combined = combined.rename_axis("timestamp").reset_index()
+        else:
+            raise ValueError("OHLCV data must include a timestamp column or index")
 
     timestamps = pd.to_datetime(combined["timestamp"], errors="coerce")
     if timestamps.isna().any():
@@ -59,11 +68,19 @@ def load_cached_ohlcv(csv_path: str | Path) -> pd.DataFrame | None:
     return lowercase_ohlcv_columns(df)
 
 
+def _normalize_resample_rule(rule: str) -> str:
+    """Use pandas' unambiguous ``min`` alias for numeric minute rules."""
+    if rule.endswith("m") and rule[:-1].isdecimal():
+        return f"{rule[:-1]}min"
+    return rule
+
+
 def resample_ohlcv(
     df: pd.DataFrame, rule: str, offset: str | None = None
 ) -> pd.DataFrame:
     """Aggregate candle-open OHLCV rows into completed bars labeled at close."""
 
+    rule = _normalize_resample_rule(rule)
     df_temp = df.copy()
     if not pd.api.types.is_datetime64_any_dtype(df_temp["timestamp"]):
         df_temp["timestamp"] = pd.to_datetime(df_temp["timestamp"])
@@ -111,6 +128,7 @@ def resample_ohlcv(
 
 def resample_close(series: pd.Series, rule: str, offset: str | None = None):
     """Return completed-bar closes, optionally aligned to a session offset."""
+    rule = _normalize_resample_rule(rule)
     if offset is None:
         return series.resample(rule, label="right", closed="left").last().dropna()
     return (

@@ -25,7 +25,7 @@ uv sync
 uv run python src/trade_ai/app.py
 ```
 
-Set `OPENALGO_API_KEY` in the shell before starting the application or training. `OPENALGO_HOST` is optional. The application does not load `.env` automatically; setup-start.md explains how to export local settings.
+The app loads values from the repository-root `.env` and validates all configured application settings before startup. Values already set in the shell take precedence. See [setup-start.md](setup-start.md) for the required settings.
 
 Run the full dual-model training pipeline in the foreground with:
 
@@ -85,4 +85,4 @@ error in `data.error`. Endpoint payload and error contracts are kept in the
 corresponding `*Types.py` module; global intents and events are in
 `universalTypes.py`.
 
-Training caches and model checkpoints are runtime files under `src/trade_ai/tickData/` and `src/trade_ai/.run_cache/` when generated; they are not part of the source tree. The prediction history request also caps processing at 25,000 rows; this is not a 10-million-row batch-processing loop.
+Training caches and model checkpoints are runtime files under `src/trade_ai/model/training/tickData/` and `src/trade_ai/model/.run_cache/` when generated; they are not part of the source tree. The prediction history request also caps processing at 25,000 rows; this is not a 10-million-row batch-processing loop.

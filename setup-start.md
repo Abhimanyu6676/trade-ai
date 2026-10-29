@@ -38,11 +38,12 @@ Run commands from the repository root.
    ```dotenv
    OPENALGO_API_KEY=your-api-key
    OPENALGO_HOST=https://your-openalgo-host
+   TRADE_AI_CHAT_ORIGINS=http://localhost:3011,http://127.0.0.1:3011
    ```
 
-   `OPENALGO_API_KEY` is required. `OPENALGO_HOST` is optional and defaults to the endpoint configured in `src/trade_ai/openalgo/openalgo_client.py`. Do not commit `.env` or put credential values in tracked files.
+   All three settings are required when starting the app. `OPENALGO_HOST` should point to the OpenAlgo endpoint, and `TRADE_AI_CHAT_ORIGINS` is a comma-separated list of allowed frontend origins. Do not commit `.env` or put credential values in tracked files.
 
-4. Make the `.env` values available to the process. The application does not load `.env` automatically:
+4. The application loads the repository-root `.env` before startup. Shell variables take precedence. You can also export values explicitly when starting from a different environment:
 
    ```sh
    set -a
@@ -50,7 +51,7 @@ Run commands from the repository root.
    set +a
    ```
 
-5. (When using the browser client from a different origin) Configure `TRADE_AI_CHAT_ORIGINS` in the server environment with a comma-separated list of frontend origins. It defaults to `http://localhost:3011,http://127.0.0.1:3011`.
+5. The startup validator checks that all settings declared in `APPLICATION_ENVIRONMENT_VARIABLES` are present and nonblank before loading models or starting the server.
 
 ## Dependencies Guide
 
@@ -65,10 +66,14 @@ Before launching the app or training, confirm:
 
 - You are in the repository root and `uv sync` has completed.
 - Python is 3.14 or newer.
-- `OPENALGO_API_KEY` is present in the current shell. This check does not print its value:
+- `OPENALGO_API_KEY` is set in the shell or declared in the repository-root `.env`. This check does not print its value:
 
   ```sh
-  test -n "$OPENALGO_API_KEY" && echo "OPENALGO_API_KEY is set" || echo "OPENALGO_API_KEY is missing"
+  if test -n "$OPENALGO_API_KEY" || grep -qE '^[[:space:]]*OPENALGO_API_KEY[[:space:]]*=[[:space:]]*[^[:space:]#]' .env 2>/dev/null; then
+    echo "OPENALGO_API_KEY is configured"
+  else
+    echo "OPENALGO_API_KEY is missing"
+  fi
   ```
 
 - The configured OpenAlgo endpoint is reachable and its API key is valid.
@@ -136,7 +141,7 @@ The app can start without trained checkpoints, but it cannot produce a model for
   sudo apt-get install -y libgomp1
   ```
 
-- **`OPENALGO_API_KEY` missing:** source `.env` into the same shell before launching the app or training. The app does not read `.env` on its own.
+- **`OPENALGO_API_KEY` missing:** confirm it is declared in the repository-root `.env` or exported in the shell. The application loads `.env` at startup; restart the app after changing the file.
 - **OpenAlgo connection/authentication errors:** verify `OPENALGO_HOST`, confirm the endpoint is reachable from the machine, and check that the API key is valid. Keep the key private when collecting or sharing logs.
 - **Temporary file execution errors on a `noexec` host:** use the repo-local `.run_cache` for `TMPDIR` and `PIP_CACHE_DIR` as shown in Common Commands.
 - **Dependencies appear missing after a project update:** run `uv sync` from the repository root, then retry using `uv run`.

@@ -1,12 +1,13 @@
 """Event API routes."""
 
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field, field_validator
 
 from trade_ai.logger import logger
+from trade_ai.model.dataStore import dataStore
 from trade_ai.openalgo.openalgoTypes import TYPE_OPENALGO_EXCHANGE
 from trade_ai.server.serverTypes import (
     UniversalServerResponse,
@@ -33,6 +34,7 @@ class EventRequest(BaseModel):
 @dataclass
 class EventResponseDataType:
     ticker: str
+    history: list[dict[str, object]] | None
 
 
 EventApiResponse = UniversalServerResponse[
@@ -48,13 +50,23 @@ async def predict(request: Annotated[EventRequest, Query()]) -> EventApiResponse
     """Return the normalized ticker from the event test request."""
     try:
         ticker = request.ticker.strip().upper()
+        exchange = request.exchange
 
         logger.info(f"This is new test route requesting data for {ticker}")
+        history = await dataStore.get_candles(ticker, exchange)
+
         return EventApiResponse(
             intent="SERVER",
             data=serverDataType(
                 eventType="SERVER_STATUS",
-                data=EventResponseDataType(ticker=ticker),
+                data=EventResponseDataType(
+                    ticker=ticker,
+                    history=(
+                        cast(list[dict[str, object]], history.to_dict(orient="records"))
+                        if history is not None
+                        else None
+                    ),
+                ),
             ),
         )
     except Exception as error:

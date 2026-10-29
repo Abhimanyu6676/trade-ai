@@ -139,4 +139,4 @@ async def hello_world() -> ServerStatusResponse:
 
 def run_server() -> None:
     """Run Uvicorn in the current process until shutdown."""
-    uvicorn.run(server_app, host="0.0.0.0", port=3010)
+    uvicorn.run(server_app, host="0.0.0.0", port=3010, access_log=False)
