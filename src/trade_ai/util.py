@@ -1,9 +1,11 @@
 """Shared data utilities used by training and inference."""
 
+from numbers import Real
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
+from pandas.api.typing import NaTType
 
 from trade_ai.logger import logger
 
@@ -28,6 +30,8 @@ def merge_ohlcv_history(
 
     If both inputs contain the same timestamp, the later input wins. With one
     input, existing row order breaks timestamp ties, so appended/live rows win.
+    Timestamps are normalized to timezone-naive Asia/Kolkata market time before
+    sorting so mixed naive, offset-aware, and Unix timestamps can be combined.
     """
     frames = [
         frame
@@ -50,15 +54,50 @@ def merge_ohlcv_history(
         else:
             raise ValueError("OHLCV data must include a timestamp column or index")
 
-    timestamps = pd.to_datetime(combined["timestamp"], errors="coerce")
+    timestamps = pd.Series(
+        [_normalize_market_timestamp(value) for value in combined["timestamp"]],
+        index=combined.index,
+        dtype="datetime64[ns]",
+    )
     if timestamps.isna().any():
-        raise ValueError("OHLCV data contains invalid timestamps")
+        invalid_timestamps = (
+            combined.loc[timestamps.isna(), "timestamp"].head(5).tolist()
+        )
+        raise ValueError(
+            f"OHLCV data contains invalid timestamps: {invalid_timestamps}"
+        )
     combined["timestamp"] = timestamps
     return (
         combined.sort_values("timestamp", kind="mergesort")
         .drop_duplicates(subset="timestamp", keep="last")
         .reset_index(drop=True)
     )
+
+
+def _normalize_market_timestamp(value: Any) -> pd.Timestamp | NaTType:
+    """Parse a candle timestamp as a timezone-naive India market timestamp.
+
+    Naive inputs are treated as India local time. Timezone-aware inputs are
+    converted to India local time. Numeric Unix timestamps use seconds unless
+    their magnitude indicates milliseconds; both are parsed as UTC instants.
+    """
+    if value is None:
+        return pd.NaT
+    try:
+        if isinstance(value, Real) and not isinstance(value, bool):
+            unit = "ms" if abs(value) >= 100_000_000_000 else "s"
+            timestamp = pd.to_datetime(
+                cast(Any, value), unit=unit, utc=True, errors="coerce"
+            )
+        else:
+            timestamp = pd.Timestamp(cast(Any, value))
+    except (TypeError, ValueError, OverflowError):
+        return pd.NaT
+    if pd.isna(timestamp):
+        return pd.NaT
+    if timestamp.tzinfo is not None:
+        return timestamp.tz_convert("Asia/Kolkata").tz_localize(None)
+    return timestamp
 
 
 def candles_to_dataframe(candles: list[dict[str, Any]]) -> pd.DataFrame:
@@ -68,10 +107,14 @@ def candles_to_dataframe(candles: list[dict[str, Any]]) -> pd.DataFrame:
     for timestamp in df["timestamp"]:
         if isinstance(timestamp, (int, float)):
             unit = "ms" if abs(timestamp) >= 100_000_000_000 else "s"
-            timestamps.append(pd.to_datetime(timestamp, unit=unit, errors="raise"))
+            timestamps.append(
+                pd.to_datetime(timestamp, unit=unit, utc=True, errors="raise")
+            )
         else:
             timestamps.append(pd.to_datetime(timestamp, errors="raise"))
-    df["timestamp"] = timestamps
+    df["timestamp"] = [
+        _normalize_market_timestamp(timestamp) for timestamp in timestamps
+    ]
     if (
         not df["timestamp"].is_monotonic_increasing
         or df["timestamp"].duplicated().any()

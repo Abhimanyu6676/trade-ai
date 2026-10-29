@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import datetime
 from threading import Lock
-from typing import Self, cast
+from typing import Any, Self, cast
 
 import pandas as pd
+from pandas.api.typing import NaTType
 
 from trade_ai.logger import logger
 from trade_ai.openalgo.openalgo_client import openalgo
@@ -74,9 +75,7 @@ class CandleStore:
             cached = self._candles_by_key.get(symbol_key)
             cached_copy = cached.copy(deep=True) if cached is not None else None
         if cached_copy is not None:
-            valid, first, last = await asyncio.to_thread(
-                _chronology_info, cached_copy
-            )
+            valid, first, last = await asyncio.to_thread(_chronology_info, cached_copy)
             if not valid:
                 logger.warning(
                     "Cached history for %s is not chronologically valid "
@@ -91,6 +90,18 @@ class CandleStore:
                 history = await asyncio.to_thread(
                     _slice_dates, cached_copy, start_date, end_date
                 )
+                cache_already_matches = (
+                    valid
+                    and _coerce_timestamp(first).date() == start_date
+                    and _coerce_timestamp(last).date() == end_date
+                    and len(history) == len(cached_copy)
+                )
+                if cache_already_matches:
+                    logger.debug(
+                        "Reusing existing prior-session history for %s",
+                        symbol_key,
+                    )
+                    return history
                 return await asyncio.to_thread(
                     self.replace_candles, ticker, exchange, history
                 )
@@ -164,6 +175,7 @@ class CandleStore:
         )
         return replacement
 
+
 def _timestamp_dates(frame: pd.DataFrame) -> pd.Series:
     frame = merge_ohlcv_history(frame)
     return pd.to_datetime(frame["timestamp"]).dt.date
@@ -189,6 +201,21 @@ def _chronology_info(frame: pd.DataFrame) -> tuple[bool, object, object]:
     return valid, timestamps.iloc[0], timestamps.iloc[-1]
 
 
+def _coerce_timestamp(value: object) -> datetime.datetime | NaTType:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return pd.NaT
+    if isinstance(value, pd.Timestamp):
+        return value
+    if isinstance(value, datetime.datetime):
+        return pd.Timestamp(value)
+    if isinstance(value, datetime.date):
+        return pd.Timestamp(value)
+    try:
+        return pd.to_datetime(cast(Any, value))
+    except (TypeError, ValueError):
+        return pd.NaT
+
+
 def _frame_range(frame: pd.DataFrame) -> tuple[object, object]:
     normalized = merge_ohlcv_history(frame)
     timestamps = pd.to_datetime(normalized["timestamp"])
@@ -210,18 +237,29 @@ def _log_intraday_gaps(frame: pd.DataFrame, symbol_key: str) -> None:
     normalized = merge_ohlcv_history(frame)
     timestamps = pd.to_datetime(normalized["timestamp"])
     session_dates = timestamps.dt.date
-    gaps = []
-    for _, session_timestamps in timestamps.groupby(session_dates):
-        differences = session_timestamps.diff().dropna()
-        gaps.extend(differences.loc[differences > pd.Timedelta(minutes=1)].tolist())
+    gaps: list[tuple[datetime.date, pd.Timestamp, pd.Timestamp, pd.Timedelta]] = []
+    for session_date, session_timestamps in timestamps.groupby(session_dates):
+        values = session_timestamps.tolist()
+        for previous, current in zip(values, values[1:]):
+            duration = current - previous
+            if duration > pd.Timedelta(minutes=1):
+                gaps.append((session_date, previous, current, duration))
     if gaps:
+        max_logged_gaps = 25
+        gap_details = "; ".join(
+            f"{session_date} {previous:%H:%M:%S}->{current:%H:%M:%S} ({duration})"
+            for session_date, previous, current, duration in gaps[:max_logged_gaps]
+        )
+        if len(gaps) > max_logged_gaps:
+            gap_details += f"; {len(gaps) - max_logged_gaps} additional gaps omitted"
         logger.warning(
             "History for %s has %s intraday gaps greater than one minute; "
-            "largest gap is %s. These may reflect missing source bars or "
-            "minutes with no trades.",
+            "largest gap is %s. Gap date/time ranges: %s. These may reflect "
+            "missing source bars or minutes with no trades.",
             symbol_key,
             len(gaps),
-            max(gaps),
+            max(gap[3] for gap in gaps),
+            gap_details,
         )
 
 

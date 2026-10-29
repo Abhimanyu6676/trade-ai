@@ -42,6 +42,16 @@ def predict(
     sequence_length: int = DEFAULT_SEQUENCE_LENGTH,
 ) -> tuple[int, float, dict]:
     """Generate an ensemble prediction without changing loaded model state."""
+    normalized_df = merge_ohlcv_history(raw_df)
+    return _predict_normalized(normalized_df, ticker, sequence_length)
+
+
+def _predict_normalized(
+    raw_df: pd.DataFrame,
+    ticker: str,
+    sequence_length: int,
+) -> tuple[int, float, dict]:
+    """Run the model ensemble on chronological, deduplicated OHLCV rows."""
     model_manager = get_model_manager()
     lgb_model = model_manager.get_model("lgb")
     gru_model = model_manager.get_model("gru")
@@ -50,7 +60,6 @@ def predict(
         logger.warning("No trained models are loaded.")
         return 0, 0.0, {"error": "Models not loaded"}
 
-    raw_df = merge_ohlcv_history(raw_df)
     df_lgb_feat = compute_normalized_features(raw_df, ticker, model_type="lgb")
     df_gru_feat = compute_normalized_features(raw_df, ticker, model_type="gru")
 
@@ -123,7 +132,7 @@ async def predict_with_history(
     exchange: TYPE_OPENALGO_EXCHANGE,
     supplied_candles: list[dict[str, Any]] | None,
     sessions: int = 30,
-) -> tuple[pd.DataFrame, int, float]:
+) -> tuple[pd.DataFrame, int, float, dict[str, Any]]:
     """Fetch prior history, combine target-day candles, and run inference."""
     try:
         target_date = datetime.date.today()
@@ -178,10 +187,11 @@ async def predict_with_history(
         raise PredictionError(f"Execution Failure: {error!s}", 500) from error
 
 
-def predict_from_dataframe(ticker: str, df: pd.DataFrame):
-    """Run inference against an already merged chronological candle frame."""
-    df = merge_ohlcv_history(df)
-    signal, confidence, breakdown = predict(
+def predict_from_dataframe(
+    ticker: str, df: pd.DataFrame
+) -> tuple[pd.DataFrame, int, float, dict[str, Any]]:
+    """Run inference on a pre-merged chronological candle frame."""
+    signal, confidence, breakdown = _predict_normalized(
         df,
         ticker,
         DEFAULT_SEQUENCE_LENGTH,
@@ -190,4 +200,14 @@ def predict_from_dataframe(ticker: str, df: pd.DataFrame):
         message = str(breakdown["error"])
         status_code = 503 if message == "Models not loaded" else 422
         raise PredictionError(message, status_code)
-    return df, signal, confidence
+    logger.info(
+        "Prediction result for %s: signal=%s, confidence=%.4f, "
+        "candles_processed=%s, latest_candle=%s, breakdown=%s",
+        ticker,
+        signal,
+        confidence,
+        len(df),
+        df["timestamp"].iloc[-1],
+        breakdown,
+    )
+    return df, signal, confidence, breakdown

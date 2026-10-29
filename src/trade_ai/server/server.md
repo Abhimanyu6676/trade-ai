@@ -24,7 +24,7 @@ The server binds to `0.0.0.0`. Browser origins are controlled by
 | --- | --- | --- | --- |
 | `GET` | `/` | Basic API availability check (`SERVER/SERVER_STATUS`). | `{"intent":"SERVER","data":{"eventType":"SERVER_STATUS","data":{"service":"trade-ai","status":"online"},"error":null}}` |
 | `GET` | `/api/event/test` | Validate event query parameters, fetch/cache recent OHLCV history, and return the normalized ticker with history as a JSON array of row objects (`SERVER/SERVER_STATUS`). | `{"intent":"SERVER","data":{"eventType":"SERVER_STATUS","data":{"ticker":"WIPRO","history":[{"timestamp":"2026-10-28T09:15:00","open":1510.5,"high":1512.0,"low":1509.0,"close":1511.5,"volume":1200}]},"error":null}}` |
-| `POST` | `/api/brain/predict` | Run prediction using supplied candles or fetch history (`MODEL/PREDICTION`). | `{"intent":"MODEL","data":{"eventType":"PREDICTION","data":{"ticker":"WIPRO","exchange":"BSE","days_back":null,"interval":"1m","signal":1,"confidence":0.82,"candles_processed":420},"error":null}}` |
+| `POST` | `/api/brain/predict` | Run prediction using supplied candles or fetch history (`MODEL/PREDICTION`). | `{"intent":"MODEL","data":{"eventType":"PREDICTION","data":{"ticker":"WIPRO","exchange":"BSE","days_back":null,"interval":"1m","signal":1,"confidence":0.82,"candles_processed":420,"prediction_timestamp":"2026-10-29T15:14:00+05:30","breakdown":{"lgb_probabilities":[0.1,0.2,0.7],"gru_probabilities":[0.2,0.3,0.5],"ensemble_probabilities":[0.15,0.25,0.6]}},"error":null}}` |
 | `POST` | `/api/openalgo/history` | Fetch broker history through the OpenAlgo Python client (`OPENALGO/HISTORY`). | `{"intent":"OPENALGO","data":{"eventType":"HISTORY","data":{"symbol":"WIPRO","exchange":"BSE","interval":"1m","candles":[{"timestamp":1790842500,"open":1510.5,"high":1512.0,"low":1509.0,"close":1511.5,"volume":1200,"oi":null}]},"error":null}}` |
 | `GET` | `/api/openalgo/analyser-status` | Fetch OpenAlgo analyser status (`OPENALGO/ANALYSER_STATUS`). | `{"intent":"OPENALGO","data":{"eventType":"ANALYSER_STATUS","data":{"available":true,"mode":"live","analyze_mode":true,"message":"OpenAlgo analyser is online."},"error":null}}` |
 
@@ -113,8 +113,11 @@ Send the prediction endpoint a structured body:
 `exchange` accepts `NSE` or `BSE`. The current inference pipeline accepts `1m`
 candles only. To provide candles directly, include a `candles` array of objects
 with `timestamp`, `open`, `high`, `low`, `close`, and `volume`; timestamps may
-be ISO date/time strings or Unix timestamps. Values are validated, and arrays
-must contain 1–25,000 candles. `days_back` is limited to 90 trading sessions;
+be ISO date/time strings or Unix timestamps in seconds or milliseconds.
+Offset-aware values are converted to Asia/Kolkata market time, naive date/time
+strings are treated as India local time, and Unix timestamps are interpreted as
+UTC instants before conversion.
+Values are validated, and arrays must contain 1–25,000 candles. `days_back` is limited to 90 trading sessions;
 values below 30 use the 30-session minimum. If `candles` is omitted, the API
 fetches history using `days_back`. The latest supplied candle date anchors the prediction.
 At least 30 prior trading sessions ending on the previous exchange trading
@@ -129,7 +132,13 @@ unrelated dates retained from earlier requests.
 If `candles` is omitted, the route fetches the same prior history before today,
 fetches today's candles, and merges those transient candles for inference.
 `days_back` can request a longer session lookback; values below 30 still use 30
-sessions. A data retrieval or inference failure is returned in `data.error`.
+sessions. Success data includes `breakdown` with class probability arrays for
+LightGBM, GRU, and the ensemble; an unavailable model's array is `null`. Class
+array indices are ordered `[-1, 0, 1]` (Down, Neutral, Up). Success data also
+includes `prediction_timestamp`, the timestamp of the latest candle used for
+inference. A data retrieval or inference failure is returned in `data.error`.
+Successful prediction logs include this probability breakdown when inference
+completes and immediately before the response is returned.
 Failures also use HTTP 422 for invalid or insufficient input, 502 for upstream
 history failures, 503 when models are unavailable, and 500 for unexpected
 execution errors.

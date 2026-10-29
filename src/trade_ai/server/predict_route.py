@@ -7,6 +7,7 @@ from typing import Literal, cast
 from fastapi import APIRouter, Response
 from pydantic import BaseModel, Field, field_validator
 
+from trade_ai.logger import logger
 from trade_ai.model.prediction_engine import (
     MAX_PREDICTION_LOOKBACK_SESSIONS,
     PredictionError,
@@ -43,6 +44,13 @@ class PredictionRequest(BaseModel):
 
 # Prediction endpoint response and error types
 @dataclass
+class PredictionBreakdownDataType:
+    lgb_probabilities: list[float] | None
+    gru_probabilities: list[float] | None
+    ensemble_probabilities: list[float]
+
+
+@dataclass
 class PredictionResponseDataType:
     ticker: str
     exchange: Literal["NSE", "BSE"]
@@ -51,6 +59,8 @@ class PredictionResponseDataType:
     signal: Literal[-1, 0, 1]
     confidence: float
     candles_processed: int
+    prediction_timestamp: str
+    breakdown: PredictionBreakdownDataType
 
 
 PredictionServerResponse = UniversalServerResponse[
@@ -77,11 +87,21 @@ async def predict(
             if candles_input is not None
             else None
         )
-        candles, signal, confidence = await predict_with_history(
+        candles, signal, confidence, breakdown = await predict_with_history(
             ticker,
             request.exchange,
             supplied,
             sessions=request.days_back,
+        )
+        logger.info(
+            "Sending prediction response for %s:%s: signal=%s, confidence=%.4f, "
+            "candles_processed=%s, breakdown=%s",
+            ticker,
+            request.exchange,
+            signal,
+            confidence,
+            len(candles),
+            breakdown,
         )
         return PredictionServerResponse(
             intent="MODEL",
@@ -97,17 +117,37 @@ async def predict(
                     signal=cast(Literal[-1, 0, 1], int(signal)),
                     confidence=float(confidence),
                     candles_processed=len(candles),
+                    prediction_timestamp=str(candles["timestamp"].iloc[-1]),
+                    breakdown=PredictionBreakdownDataType(
+                        lgb_probabilities=breakdown["lgb_probabilities"],
+                        gru_probabilities=breakdown["gru_probabilities"],
+                        ensemble_probabilities=breakdown[
+                            "ensemble_probabilities"
+                        ],
+                    ),
                 ),
             ),
         )
     except PredictionError as error:
         response.status_code = error.status_code
+        logger.warning(
+            "Sending prediction error response for %s:%s (HTTP %s): %s",
+            request.ticker.strip().upper(),
+            request.exchange,
+            error.status_code,
+            error,
+        )
         return PredictionServerResponse(
             intent="MODEL",
             data=serverDataType(eventType="PREDICTION", error=str(error)),
         )
     except Exception as error:
         response.status_code = 500
+        logger.exception(
+            "Sending unexpected prediction error response for %s:%s",
+            request.ticker.strip().upper(),
+            request.exchange,
+        )
         return PredictionServerResponse(
             intent="MODEL",
             data=serverDataType(eventType="PREDICTION", error=str(error)),

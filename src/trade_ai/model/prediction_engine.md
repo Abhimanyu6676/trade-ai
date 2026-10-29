@@ -18,7 +18,7 @@ Implementation: `prediction_engine.py`. The engine forecasts one of the Triple B
 4. `predict_from_dataframe()` passes the merged frame to `predict()`. `predict()` requests currently loaded model instances from `models.py`, then calls `merge_ohlcv_history()` to normalize known OHLCV names, parse timestamps, stable-sort, and drop duplicate timestamps in favor of the later row.
 5. The raw chronological candles are independently passed through feature calculation with `model_type="lgb"` and `model_type="gru"`. The two variants scale RSI differently.
 6. LightGBM predicts from the latest valid feature row. GRU receives the last `sequence_length` valid rows from the newest calendar date only.
-7. If both models return class probabilities, the engine averages them equally. If only one returns probabilities, that model is used alone. If neither can return probabilities, the engine returns an error result. The highest-probability class maps to `-1`, `0`, or `1`; confidence is that class probability.
+7. If both models return class probabilities, the engine averages them equally. If only one returns probabilities, that model is used alone. If neither can return probabilities, the engine returns an error result. The highest-probability class maps to `-1`, `0`, or `1`; confidence is that class probability. Successful results include each model's probability array and the ensemble array in the API `breakdown` field, with class order `[-1, 0, 1]`.
 
 ## Current limitations
 
