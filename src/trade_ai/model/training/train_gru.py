@@ -28,7 +28,6 @@ from .gru_sequence_builder import (
 from .labels import (
     LABEL_SCHEMA_VERSION,
     MAX_HOLDING_PERIOD,
-    add_absolute_label_atr,
     apply_triple_barrier,
 )
 
@@ -199,15 +198,11 @@ def _prepare_ticker_datasets(
         return None
 
     df_feat = compute_normalized_features(raw_df, ticker, model_type="gru")
-    df_feat = add_absolute_label_atr(df_feat, raw_df)
     df_feat = df_feat.reset_index(drop=True)
     df_feat["target"] = apply_triple_barrier(
         df=df_feat,
         timestamp_col="timestamp",
         close_col="close",
-        atr_col="ATR_14_1m_absolute",
-        tp_multiplier=2.0,
-        sl_multiplier=1.0,
         max_holding_period=MAX_HOLDING_PERIOD,
         start_hour=10,
         start_minute=0,

@@ -22,10 +22,10 @@ trains LightGBM first and GRU second.
    the per-ticker splits and train up to 500 rounds. Training and validation
    row counts and class distributions are logged; LightGBM reports both losses
    every 50 rounds and uses validation loss for early stopping after 50 rounds
-   without improvement. Label barriers use absolute ATR in price units from the
-   previous completed 1-minute candle; relative ATR remains a model feature.
-   Checkpoints made with the previous label schema are rejected and require
-   retraining.
+   without improvement. Labels compare future candle closes against a take-profit
+   barrier 1% above the entry close and a stop-loss barrier 0.5% below it. The
+   barrier percentages no longer depend on ATR. Checkpoints made with an earlier
+   label schema are rejected and require retraining.
    The selected checkpoint is saved only if its validation logloss beats the
    training class-prior baseline. Its sidecar records label schema version,
    selected iteration, and validation metrics. For cache misses in

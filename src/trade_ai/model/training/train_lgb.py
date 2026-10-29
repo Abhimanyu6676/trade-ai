@@ -22,7 +22,6 @@ from ..features import (
 from .labels import (
     LABEL_SCHEMA_VERSION,
     MAX_HOLDING_PERIOD,
-    add_absolute_label_atr,
     apply_triple_barrier,
 )
 
@@ -163,7 +162,6 @@ def prepare_training_data() -> tuple[
 
         # 1. Build multi-timeframe features
         df_feat = compute_normalized_features(raw_df, ticker, model_type="lgb")
-        df_feat = add_absolute_label_atr(df_feat, raw_df)
 
         # Reset to a positional index so the split purge is measured in candle rows.
         df_feat = df_feat.reset_index(drop=True)
@@ -173,9 +171,6 @@ def prepare_training_data() -> tuple[
             df=df_feat,
             timestamp_col="timestamp",
             close_col="close",
-            atr_col="ATR_14_1m_absolute",
-            tp_multiplier=2.0,
-            sl_multiplier=1.0,
             max_holding_period=MAX_HOLDING_PERIOD,
             start_hour=10,
             start_minute=0,

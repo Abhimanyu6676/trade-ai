@@ -5,8 +5,10 @@ from trade_ai.indicator.atr import calculate_atr
 from trade_ai.logger import logger
 
 MAX_HOLDING_PERIOD = 60
-# v2 changes the barrier input from relative ATR to absolute price-unit ATR.
-LABEL_SCHEMA_VERSION = 2
+# v3 replaces ATR barriers with fixed percentage barriers.
+LABEL_SCHEMA_VERSION = 3
+TAKE_PROFIT_PCT = 0.01
+STOP_LOSS_PCT = 0.005
 
 
 def add_absolute_label_atr(
@@ -14,10 +16,10 @@ def add_absolute_label_atr(
     source_df: pd.DataFrame,
     period: int = 14,
 ) -> pd.DataFrame:
-    """Attach completed-bar ATR in price units for Triple Barrier labels.
+    """Attach prior completed-bar ATR for future ATR-based label experiments.
 
-    Candles are timestamped at their open, so shift source ATR by one row to
-    align the last completed candle with each entry row, as the 1m feature does.
+    This helper is retained for optional experiments. The active trainers use
+    fixed percentage barriers and do not call it.
     """
     label_atr = calculate_atr(source_df, period=period, relative=False).shift(1)
     atr_by_timestamp = pd.DataFrame(
@@ -39,9 +41,8 @@ def apply_triple_barrier(
     df: pd.DataFrame,
     timestamp_col: str = "timestamp",
     close_col: str = "close",
-    atr_col: str = "ATR_14_1m",
-    tp_multiplier: float = 2.0,
-    sl_multiplier: float = 1.0,
+    take_profit_pct: float = TAKE_PROFIT_PCT,
+    stop_loss_pct: float = STOP_LOSS_PCT,
     max_holding_period: int = MAX_HOLDING_PERIOD,
     start_hour: int = 10,
     start_minute: int = 0,
@@ -52,25 +53,27 @@ def apply_triple_barrier(
 ) -> pd.Series:
     """Generates Triple Barrier Method labels (1: Win, -1: Loss, 0: Timeout)
 
-    Entries are restricted to the configured window. ``atr_col`` must contain
-    absolute ATR in the same price units as ``close_col``. Each forward barrier
-    search stops at the earlier of the holding limit or that trading session's
-    close. Candle timestamps are assumed to be candle-open timestamps.
+    Entries are restricted to the configured window. The take-profit and
+    stop-loss barriers are fixed percentages above and below the entry close.
+    Each forward barrier search stops at the earlier of the holding limit or
+    that trading session's close. Candle timestamps are assumed to be at the
+    candle open.
     """
     df = df.copy()
     logger.info(
         "Starting Triple Barrier generation on %d rows. Time window: %02d:%02d to"
-        " %02d:%02d",
+        " %02d:%02d. Barriers: TP +%.2f%%, SL -%.2f%%",
         len(df),
         start_hour,
         start_minute,
         end_hour,
         end_minute,
+        take_profit_pct * 100,
+        stop_loss_pct * 100,
     )
 
     # Bulletproof type coercion
     closes = pd.to_numeric(df[close_col], errors="coerce").to_numpy(dtype=float)
-    atrs = pd.to_numeric(df[atr_col], errors="coerce").to_numpy(dtype=float)
 
     # Parse timestamps to extract time of day
     timestamps = pd.to_datetime(df[timestamp_col])
@@ -107,11 +110,21 @@ def apply_triple_barrier(
     )
 
     skipped_time = n - len(entry_indices)
-    skipped_nan = 0
+    invalid_entry_prices = 0
     valid_labels = 0
 
     if max_holding_period < 1:
         raise ValueError("max_holding_period must be at least 1")
+    if (
+        not np.isfinite(take_profit_pct)
+        or not np.isfinite(stop_loss_pct)
+        or take_profit_pct <= 0
+        or not 0 < stop_loss_pct < 1
+    ):
+        raise ValueError(
+            "Barrier percentages must be finite and positive; "
+            "stop loss must be below 100%"
+        )
 
     for processed_entries, row_index in enumerate(entry_indices, start=1):
         if processed_entries % 50_000 == 0:
@@ -123,16 +136,15 @@ def apply_triple_barrier(
 
         i = int(row_index)
         entry_price = closes[i]
-        atr = atrs[i]
 
-        # Handle cases where ATR, price, or coerced value is NaN
-        if np.isnan(atr) or np.isnan(entry_price) or atr == 0:
-            skipped_nan += 1
+        # A non-positive or invalid entry cannot form percentage barriers.
+        if not np.isfinite(entry_price) or entry_price <= 0:
+            invalid_entry_prices += 1
             labels[i] = 0
             continue
 
-        upper_barrier = entry_price + (atr * tp_multiplier)
-        lower_barrier = entry_price - (atr * sl_multiplier)
+        upper_barrier = entry_price * (1 + take_profit_pct)
+        lower_barrier = entry_price * (1 - stop_loss_pct)
 
         # Bound the vertical barrier by both the holding period and this session.
         # The first candle at/after market close is not a valid intraday outcome.
@@ -183,8 +195,8 @@ def apply_triple_barrier(
         skipped_time,
     )
     logger.info(
-        " - Skipped (NaN/Zero ATR or Price): %d rows",
-        skipped_nan,
+        " - Invalid entry prices assigned timeout labels: %d rows",
+        invalid_entry_prices,
     )
 
     return pd.Series(labels, index=df.index, name="target")
