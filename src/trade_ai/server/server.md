@@ -80,8 +80,9 @@ encode the typed response envelope into JSON-compatible values before building
 `GET /api/event/test` accepts `ticker` and an optional `exchange` query
 parameter. `ticker` must contain 1–32 non-blank characters and is returned
 trimmed and uppercased. `exchange` accepts `NSE` or `BSE` and defaults to
-`NSE`. The route awaits the in-memory candle store, which fetches 30 calendar
-days of `1m` history on a cache miss and stores/returns a pandas DataFrame.
+`NSE`. The route awaits the in-memory candle store, which fetches 30 trading
+sessions of `1m` history through the previous trading date when the cache does
+not cover that range and stores/returns a pandas DataFrame.
 History is included as a JSON array of candle row objects. For example:
 `/api/event/test?ticker=WIPRO&exchange=BSE`.
 
@@ -113,9 +114,25 @@ Send the prediction endpoint a structured body:
 candles only. To provide candles directly, include a `candles` array of objects
 with `timestamp`, `open`, `high`, `low`, `close`, and `volume`; timestamps may
 be ISO date/time strings or Unix timestamps. Values are validated, and arrays
-are limited to 25,000 candles. If `candles` is omitted, the API fetches history
-using `days_back`. A data retrieval or inference failure is returned in
-`data.error`.
+must contain 1–25,000 candles. `days_back` is limited to 90 trading sessions;
+values below 30 use the 30-session minimum. If `candles` is omitted, the API
+fetches history using `days_back`. The latest supplied candle date anchors the prediction.
+At least 30 prior trading sessions ending on the previous exchange trading
+date are retrieved from cached `dataStore` history or fetched from OpenAlgo.
+Coverage checks require every expected exchange trading date. Gaps between
+observed one-minute bars within a session are logged; they may reflect missing
+source data or periods with no trades and are not synthesized.
+The supplied candles are merged chronologically with this history before
+inference, but remain transient and are not saved in the in-memory history
+cache. The cache contains only the requested prior-session history, dropping
+unrelated dates retained from earlier requests.
+If `candles` is omitted, the route fetches the same prior history before today,
+fetches today's candles, and merges those transient candles for inference.
+`days_back` can request a longer session lookback; values below 30 still use 30
+sessions. A data retrieval or inference failure is returned in `data.error`.
+Failures also use HTTP 422 for invalid or insufficient input, 502 for upstream
+history failures, 503 when models are unavailable, and 500 for unexpected
+execution errors.
 
 ## Maintenance
 

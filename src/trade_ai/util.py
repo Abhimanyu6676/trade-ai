@@ -1,8 +1,11 @@
 """Shared data utilities used by training and inference."""
 
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
+
+from trade_ai.logger import logger
 
 _OHLCV_COLUMNS = {"timestamp", "open", "high", "low", "close", "volume"}
 
@@ -56,6 +59,32 @@ def merge_ohlcv_history(
         .drop_duplicates(subset="timestamp", keep="last")
         .reset_index(drop=True)
     )
+
+
+def candles_to_dataframe(candles: list[dict[str, Any]]) -> pd.DataFrame:
+    """Convert candle mappings to normalized, chronological OHLCV rows."""
+    df = pd.DataFrame(candles)
+    timestamps = []
+    for timestamp in df["timestamp"]:
+        if isinstance(timestamp, (int, float)):
+            unit = "ms" if abs(timestamp) >= 100_000_000_000 else "s"
+            timestamps.append(pd.to_datetime(timestamp, unit=unit, errors="raise"))
+        else:
+            timestamps.append(pd.to_datetime(timestamp, errors="raise"))
+    df["timestamp"] = timestamps
+    if (
+        not df["timestamp"].is_monotonic_increasing
+        or df["timestamp"].duplicated().any()
+    ):
+        logger.warning(
+            "Supplied candles are not chronologically valid "
+            "(first=%s, last=%s, rows=%s); sorting and duplicate removal "
+            "will be applied",
+            df["timestamp"].iloc[0],
+            df["timestamp"].iloc[-1],
+            len(df),
+        )
+    return merge_ohlcv_history(df)
 
 
 def load_cached_ohlcv(csv_path: str | Path) -> pd.DataFrame | None:

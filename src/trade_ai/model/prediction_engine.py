@@ -1,12 +1,18 @@
 """Generate predictions using model instances managed by ``models.py``."""
 
+import asyncio
+import datetime
+from typing import Any
+
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
 import torch
 
-from trade_ai.util import merge_ohlcv_history
 from trade_ai.logger import logger
+from trade_ai.model.dataStore import dataStore
+from trade_ai.openalgo.openalgo_client import TYPE_OPENALGO_EXCHANGE, openalgo
+from trade_ai.util import candles_to_dataframe, merge_ohlcv_history
 
 from .features import (
     GRU_MODEL_INPUT_COLUMNS,
@@ -18,6 +24,17 @@ from .training.gru_sequence_builder import (
     DEFAULT_SEQUENCE_LENGTH,
     latest_session_sequence,
 )
+
+MAX_PREDICTION_LOOKBACK_SESSIONS = 90
+
+
+class PredictionError(Exception):
+    """Prediction failure with an HTTP status suitable for the route."""
+
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 def predict(
     raw_df: pd.DataFrame,
@@ -101,11 +118,76 @@ def predict(
     return signal, confidence, breakdown
 
 
-def run_ai_prediction_inference(
-    raw_df: pd.DataFrame,
+async def predict_with_history(
     ticker: str,
-    sequence_length: int = DEFAULT_SEQUENCE_LENGTH,
-) -> tuple[int, float]:
-    """Wrapper function matching data engine calls."""
-    signal, confidence, _ = predict(raw_df, ticker, sequence_length)
-    return signal, confidence
+    exchange: TYPE_OPENALGO_EXCHANGE,
+    supplied_candles: list[dict[str, Any]] | None,
+    sessions: int = 30,
+) -> tuple[pd.DataFrame, int, float]:
+    """Fetch prior history, combine target-day candles, and run inference."""
+    try:
+        target_date = datetime.date.today()
+        supplied_frame = None
+        if supplied_candles is not None:
+            try:
+                supplied_frame = await asyncio.to_thread(
+                    candles_to_dataframe, supplied_candles
+                )
+            except Exception as error:
+                raise PredictionError(
+                    f"Invalid supplied candle data: {error!s}", 422
+                ) from error
+            if supplied_frame.empty:
+                raise PredictionError("No candles supplied", 422)
+            target_date = pd.to_datetime(supplied_frame["timestamp"]).max().date()
+
+        history = await dataStore.get_history_before(
+            ticker,
+            exchange,
+            target_date,
+            sessions=min(
+                MAX_PREDICTION_LOOKBACK_SESSIONS, max(30, sessions)
+            ),
+        )
+        if history is None or history.empty:
+            raise PredictionError(
+                "Unable to retrieve required trading-session history", 502
+            )
+
+        if supplied_frame is None:
+            current = await openalgo.get_history(
+                symbol=ticker,
+                exchange=exchange,
+                interval="1m",
+                start_date=target_date,
+                end_date=target_date,
+            )
+            if not isinstance(current, pd.DataFrame) or current.empty:
+                raise PredictionError(
+                    "No candles are available for the prediction date", 502
+                )
+            supplied_frame = await asyncio.to_thread(merge_ohlcv_history, current)
+
+        # Prediction-day candles are transient; dataStore retains prior sessions only.
+        combined = await asyncio.to_thread(merge_ohlcv_history, history, supplied_frame)
+        return await asyncio.to_thread(predict_from_dataframe, ticker, combined)
+    except PredictionError:
+        raise
+    except Exception as error:
+        logger.exception("Prediction history preparation failed for %s", ticker)
+        raise PredictionError(f"Execution Failure: {error!s}", 500) from error
+
+
+def predict_from_dataframe(ticker: str, df: pd.DataFrame):
+    """Run inference against an already merged chronological candle frame."""
+    df = merge_ohlcv_history(df)
+    signal, confidence, breakdown = predict(
+        df,
+        ticker,
+        DEFAULT_SEQUENCE_LENGTH,
+    )
+    if "error" in breakdown:
+        message = str(breakdown["error"])
+        status_code = 503 if message == "Models not loaded" else 422
+        raise PredictionError(message, status_code)
+    return df, signal, confidence

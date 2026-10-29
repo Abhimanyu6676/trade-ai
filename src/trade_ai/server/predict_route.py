@@ -4,10 +4,14 @@ import asyncio
 from dataclasses import dataclass
 from typing import Literal, cast
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from pydantic import BaseModel, Field, field_validator
 
-from trade_ai.model.data_engine import fetch_and_clean_candles, predict_from_candles
+from trade_ai.model.prediction_engine import (
+    MAX_PREDICTION_LOOKBACK_SESSIONS,
+    PredictionError,
+    predict_with_history,
+)
 from trade_ai.openalgo.openalgoTypes import TYPE_OPENALGO_EXCHANGE, OhlcvCandle
 from trade_ai.server.serverTypes import (
     UniversalServerResponse,
@@ -20,7 +24,9 @@ router = APIRouter()
 class PredictionRequest(BaseModel):
     ticker: str = Field(min_length=1, max_length=32)
     exchange: TYPE_OPENALGO_EXCHANGE = "NSE"
-    days_back: int = Field(default=7, ge=1, le=3650)
+    days_back: int = Field(
+        default=7, ge=1, le=MAX_PREDICTION_LOOKBACK_SESSIONS
+    )
     interval: Literal["1m"] = "1m"
     candles: list[OhlcvCandle] | None = Field(
         default=None, min_length=1, max_length=25000
@@ -55,39 +61,28 @@ PredictionServerResponse = UniversalServerResponse[
 ]
 
 
-def _predict_validated_candles(ticker: str, candles: list[OhlcvCandle]):
-    """Convert and predict caller candles outside the event loop."""
-    return predict_from_candles(
-        ticker,
-        [candle.model_dump() for candle in candles],
-    )
-
-
 @router.post("/predict", response_model=PredictionServerResponse)
-async def predict(request: PredictionRequest) -> PredictionServerResponse:
-    """Run inference on supplied candles or fetch history from OpenAlgo."""
+async def predict(
+    request: PredictionRequest, response: Response
+) -> PredictionServerResponse:
+    """Run inference with 30 prior trading sessions and target-day candles."""
     try:
         ticker = request.ticker.strip().upper()
-        if request.candles is not None:
-            candles, signal, confidence = await asyncio.to_thread(
-                _predict_validated_candles,
-                ticker,
-                request.candles,
+        candles_input = request.candles
+        supplied = (
+            await asyncio.to_thread(
+                lambda candles: [candle.model_dump() for candle in candles],
+                candles_input,
             )
-            days_back = None
-        else:
-            candles, signal, confidence = await fetch_and_clean_candles(
-                ticker,
-                request.days_back,
-                request.interval,
-                request.exchange,
-            )
-            if candles is None:
-                return PredictionServerResponse(
-                    intent="MODEL",
-                    data=serverDataType(eventType="PREDICTION", error=str(signal)),
-                )
-            days_back = request.days_back
+            if candles_input is not None
+            else None
+        )
+        candles, signal, confidence = await predict_with_history(
+            ticker,
+            request.exchange,
+            supplied,
+            sessions=request.days_back,
+        )
         return PredictionServerResponse(
             intent="MODEL",
             data=serverDataType(
@@ -95,7 +90,9 @@ async def predict(request: PredictionRequest) -> PredictionServerResponse:
                 data=PredictionResponseDataType(
                     ticker=ticker,
                     exchange=request.exchange,
-                    days_back=days_back,
+                    days_back=(
+                        None if request.candles is not None else request.days_back
+                    ),
                     interval=request.interval,
                     signal=cast(Literal[-1, 0, 1], int(signal)),
                     confidence=float(confidence),
@@ -103,7 +100,14 @@ async def predict(request: PredictionRequest) -> PredictionServerResponse:
                 ),
             ),
         )
+    except PredictionError as error:
+        response.status_code = error.status_code
+        return PredictionServerResponse(
+            intent="MODEL",
+            data=serverDataType(eventType="PREDICTION", error=str(error)),
+        )
     except Exception as error:
+        response.status_code = 500
         return PredictionServerResponse(
             intent="MODEL",
             data=serverDataType(eventType="PREDICTION", error=str(error)),

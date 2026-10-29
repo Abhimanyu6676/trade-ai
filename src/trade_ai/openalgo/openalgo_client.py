@@ -40,6 +40,8 @@ class OpenAlgo:
 
     def __init__(self) -> None:
         self._client: Any | None = None
+        self._holiday_calendars: dict[int, OpenAlgoHolidaysResponse] = {}
+        self._holiday_locks: dict[int, asyncio.Lock] = {}
 
     def initiate(self) -> Any:
         """Create the SDK client once from the current environment settings."""
@@ -98,29 +100,67 @@ class OpenAlgo:
     async def get_holidays(
         self, year: int | None = None
     ) -> OpenAlgoHolidaysResponse | None:
-        """Return the holiday calendar for a year, or ``None`` on failure."""
+        """Return a cached year's holiday calendar, fetching it on a cache miss."""
+        requested_year = year if year is not None else Date.today().year
+        cached = self._holiday_calendars.get(requested_year)
+        if cached is not None:
+            logger.debug("Using cached holiday calendar for %s", requested_year)
+            return cached
 
-        try:
-            client = self.initiate()
-            holidays = await asyncio.to_thread(client.holidays, year=year)
-            if not isinstance(holidays, dict) or holidays.get("status") != "success":
-                error_message = (
-                    holidays.get("message", "OpenAlgo holidays request failed.")
-                    if isinstance(holidays, dict)
-                    else "OpenAlgo returned an invalid holidays response."
+        lock = self._holiday_locks.get(requested_year)
+        if lock is None:
+            lock = self._holiday_locks[requested_year] = asyncio.Lock()
+        async with lock:
+            cached = self._holiday_calendars.get(requested_year)
+            if cached is not None:
+                logger.debug("Using cached holiday calendar for %s", requested_year)
+                return cached
+
+            try:
+                client = self.initiate()
+                holidays = await asyncio.to_thread(
+                    client.holidays, year=requested_year
                 )
-                logger.error("Error Fetching Holidays: %s", error_message)
-                return None
+                if (
+                    not isinstance(holidays, dict)
+                    or holidays.get("status") != "success"
+                    or not isinstance(holidays.get("data"), list)
+                ):
+                    error_message = (
+                        holidays.get("message", "OpenAlgo holidays request failed.")
+                        if isinstance(holidays, dict)
+                        else "OpenAlgo returned an invalid holidays response."
+                    )
+                    logger.error("Error Fetching Holidays: %s", error_message)
+                    return None
 
-            logger.info(
-                "Fetched %s market holidays for %s",
-                len(holidays.get("data", [])),
-                holidays.get("year", year),
-            )
-            return cast(OpenAlgoHolidaysResponse, holidays)
-        except Exception as e:
-            logger.error("Error Fetching Holidays: %s", e)
-            return None
+                response_year = holidays.get("year", requested_year)
+                if response_year != requested_year:
+                    logger.error(
+                        "OpenAlgo returned the %s holiday calendar when %s was requested",
+                        response_year,
+                        requested_year,
+                    )
+                    return None
+
+                calendar = cast(OpenAlgoHolidaysResponse, holidays)
+                if not calendar["data"]:
+                    logger.warning(
+                        "OpenAlgo returned an empty holiday calendar for %s; "
+                        "it will not be cached",
+                        requested_year,
+                    )
+                    return calendar
+                self._holiday_calendars[requested_year] = calendar
+                logger.info(
+                    "Fetched and cached %s market holidays for %s",
+                    len(calendar["data"]),
+                    requested_year,
+                )
+                return calendar
+            except Exception as e:
+                logger.error("Error Fetching Holidays: %s", e)
+                return None
 
     async def getPreviousTradeDay(
         self,
@@ -129,6 +169,16 @@ class OpenAlgo:
         exchange: TYPE_OPENALGO_EXCHANGE = "NSE",
     ) -> Date | None:
         """Return the date ``days`` trading sessions before ``date`` (exclusive)."""
+        trading_dates = await self.getPreviousTradeDays(date, days, exchange)
+        return trading_dates[0] if trading_dates else None
+
+    async def getPreviousTradeDays(
+        self,
+        date: Date | None = None,
+        days: int = 1,
+        exchange: TYPE_OPENALGO_EXCHANGE = "NSE",
+    ) -> list[Date]:
+        """Return preceding trading-session dates, nearest first."""
 
         if isinstance(days, bool) or not isinstance(days, int) or days < 1:
             raise ValueError("days must be a positive integer")
@@ -136,9 +186,9 @@ class OpenAlgo:
         reference_date = date or Date.today()
         candidate = reference_date - timedelta(days=1)
         calendars: dict[int, tuple[set[Date], set[Date]]] = {}
-        trading_days_found = 0
+        trading_dates = []
 
-        while trading_days_found < days:
+        while len(trading_dates) < days:
             if candidate.year not in calendars:
                 holiday_dates: set[Date] = set()
                 open_dates: set[Date] = set()
@@ -164,18 +214,19 @@ class OpenAlgo:
             is_open = candidate in open_dates
 
             if is_open or (candidate.weekday() < 5 and not is_closed):
-                trading_days_found += 1
-                if trading_days_found == days:
-                    logger.info(
-                        "%s trading day(s) before %s for %s: %s",
-                        days,
-                        reference_date,
-                        exchange,
-                        candidate,
-                    )
-                    return candidate
+                trading_dates.append(candidate)
 
             candidate -= timedelta(days=1)
+
+        logger.info(
+            "%s trading day(s) before %s for %s: %s through %s",
+            days,
+            reference_date,
+            exchange,
+            trading_dates[-1],
+            trading_dates[0],
+        )
+        return trading_dates
 
     async def get_analyzer_status(self) -> get_analyser_status_response:
         """Return the OpenAlgo analyzer status response."""

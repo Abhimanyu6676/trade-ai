@@ -50,10 +50,9 @@ trade-ai/
     ├── app.py                        # Loads prediction models and starts the API
     ├── logger.py                     # Shared project logging configuration
     ├── openalgo/                     # OpenAlgo client, types, and conversion helpers
-    ├── util.py                       # OHLCV ordering, merge, and resampling helpers
+    ├── util.py                       # Candle conversion, merge, and resampling helpers
     ├── model/
     │   ├── stock_metadata.py         # Ticker metadata and encoded categories
-    │   ├── data_engine.py             # History fetch, feature warm-up, display, inference call
     │   ├── features.py                # Multi-timeframe model features
     │   ├── training/
     │   │   ├── gru_sequence_builder.py     # Same-calendar-date GRU sequence helpers
@@ -63,8 +62,7 @@ trade-ai/
     │   │   ├── train_gru.py           # GRU training and session-safe dataset
     │   │   └── train_master.py        # Selective model-training orchestration
     │   ├── models.py                  # Model architecture, loaded instances, and lifecycle
-    │   ├── prediction_engine.py       # Model probability blending and inference
-    │   ├── data_engine.md             # Data ingestion behavior notes
+    │   ├── prediction_engine.py       # Prediction history, orchestration, blending, and inference
     │   ├── prediction_engine.md       # Ensemble behavior notes
     ├── indicator/
     │   ├── *.py                       # Indicator implementations
