@@ -48,10 +48,12 @@ trains LightGBM first and GRU second.
    consecutive epochs, or at the 20-epoch limit. It saves the checkpoint with
    the best validation loss. The checkpoint includes the feature schema version
    and ordered input-column names. Each trainer selects its model-specific
-   schema; GRU excludes static metadata, LightGBM includes it, and both exclude
-   raw OHLCV from model inputs. See `../features.md` for counts and full input
-   lists. GRU training raises an error if no valid train and validation sequences
-   are available.
+   schema; GRU excludes static metadata, while LightGBM includes fixed integer
+   codes for `Cap` and `Sector` and declares them as categorical. When adding a
+   sector, append a stable code, map unknown tickers to `Other`, and retrain
+   LightGBM. Both models exclude raw OHLCV from model inputs. See
+   `../features.md` for counts and full input lists. GRU training raises an
+   error if no valid train and validation sequences are available.
 6. **Reload selected models after success.** The `finally` block reloads the
    selected models only if every selected trainer returned successfully. If a
    trainer raises an error, reload is skipped and the selected models remain

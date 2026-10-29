@@ -19,7 +19,7 @@ from trade_ai.util import lowercase_ohlcv_columns, resample_ohlcv
 DEFAULT_TIMEFRAMES = ("1m", "5m", "15m", "1h")
 DEFAULT_EMA_SPANS = (9, 21, 50)
 # Increment when the model input feature names, order, or meanings change.
-FEATURE_SCHEMA_VERSION = 5
+FEATURE_SCHEMA_VERSION = 6
 
 
 def _add_multi_timeframe_features(

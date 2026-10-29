@@ -10,7 +10,7 @@ import pandas as pd
 
 from trade_ai.logger import logger
 from trade_ai.model.models import LGB_MODEL_PATH, LGB_MODEL_SCHEMA_PATH
-from trade_ai.model.stock_metadata import STOCK_METADATA
+from trade_ai.model.stock_metadata import METADATA_FEATURE_COLUMNS, STOCK_METADATA
 from trade_ai.openalgo.openalgo_client import TYPE_OPENALGO_EXCHANGE, openalgo
 from trade_ai.util import merge_ohlcv_history
 
@@ -271,8 +271,18 @@ def train_lightgbm_model() -> bool:
         class_counts(y_val),
     )
 
-    train_data = lgb.Dataset(X_train, label=y_train)
-    val_data = lgb.Dataset(X_val, label=y_val, reference=train_data)
+    categorical_features: list[str] = list(METADATA_FEATURE_COLUMNS)
+    train_data = lgb.Dataset(
+        X_train,
+        label=y_train,
+        categorical_feature=categorical_features,
+    )
+    val_data = lgb.Dataset(
+        X_val,
+        label=y_val,
+        reference=train_data,
+        categorical_feature=categorical_features,
+    )
 
     params = {
         "objective": "multiclass",

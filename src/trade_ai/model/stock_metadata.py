@@ -1,4 +1,4 @@
-"""Enum-backed stock market-cap and sector metadata."""
+"""Stable categorical codes for stock market-cap and sector metadata."""
 
 from enum import Enum
 from typing import TypedDict
@@ -54,29 +54,28 @@ DEFAULT_STOCK_METADATA: StockMetadata = {
     "sector": Sector.OTHER,
 }
 
-def _category_label(category: Enum) -> str:
-    """Make a readable feature suffix while preserving short acronyms like IT."""
-    return "".join(
-        part if len(part) <= 2 else part.capitalize()
-        for part in category.name.split("_")
-    )
-
-
-def _category_feature_name(prefix: str, category: Enum) -> str:
-    return f"{prefix}_{_category_label(category)}"
-
-
-CAP_FEATURE_COLUMNS = tuple(
-    _category_feature_name("Cap", category) for category in MarketCap
-)
-SECTOR_FEATURE_COLUMNS = tuple(
-    _category_feature_name("Sector", category) for category in Sector
-)
-METADATA_FEATURE_COLUMNS = (*CAP_FEATURE_COLUMNS, *SECTOR_FEATURE_COLUMNS)
+# These integer identifiers are categorical values for LightGBM, not ordinal
+# measurements. Keep existing codes fixed and append new categories with new
+# codes so adding a sector never changes the model's input width or old codes.
+CAP_CATEGORY_CODES: dict[MarketCap, int] = {
+    MarketCap.LARGE: 0,
+    MarketCap.MID: 1,
+    MarketCap.SMALL: 2,
+}
+SECTOR_CATEGORY_CODES: dict[Sector, int] = {
+    Sector.BANKING: 0,
+    Sector.IT: 1,
+    Sector.AUTO: 2,
+    Sector.ENERGY: 3,
+    Sector.CONSUMER: 4,
+    Sector.METALS: 5,
+    Sector.OTHER: 6,
+}
+METADATA_FEATURE_COLUMNS = ("Cap", "Sector")
 
 
 def encode_categorical_metadata(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
-    """Add one-hot columns generated from the market-cap and sector enums."""
+    """Add stable integer codes for LightGBM categorical metadata inputs."""
     metadata = STOCK_METADATA.get(ticker.upper(), DEFAULT_STOCK_METADATA)
     cap = metadata["cap"]
     sector = metadata["sector"]
@@ -84,12 +83,6 @@ def encode_categorical_metadata(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
     if not isinstance(cap, MarketCap) or not isinstance(sector, Sector):
         raise TypeError("Stock metadata cap and sector must use their defined enums")
 
-    for category in MarketCap:
-        feature_name = _category_feature_name("Cap", category)
-        df[feature_name] = 1.0 if cap is category else 0.0
-
-    for category in Sector:
-        feature_name = _category_feature_name("Sector", category)
-        df[feature_name] = 1.0 if sector is category else 0.0
-
+    df["Cap"] = CAP_CATEGORY_CODES[cap]
+    df["Sector"] = SECTOR_CATEGORY_CODES[sector]
     return df

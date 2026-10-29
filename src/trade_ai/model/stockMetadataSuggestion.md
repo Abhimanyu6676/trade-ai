@@ -1,4 +1,4 @@
-So, I have removed the meta data features from features but when metadata sector grows would that be a problem for lgb model
+So, I have removed the meta data features from features but when metadata sector grows would that be a problem for lgb model, not feeding them to GRU
 
 Let's say I categories the stocks in 10-12 category
 Having 10 to 12 static categories (like standard GICS sectors, e.g., Tech, Financials, Healthcare, Energy) is actually the ideal sweet spot for LightGBM. Because sector classifications are macro-level groups, they are bounded and won't endlessly expand like user IDs or text tags.
