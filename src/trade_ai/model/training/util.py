@@ -40,7 +40,11 @@ def download_stock_history_in_chunks(
     )
 
     while current_start <= end_date:
-        current_end = min(current_start + timedelta(days=chunk_days - 1), end_date)
+        # Treat both endpoints as inclusive, then resume on the following day.
+        current_end = min(
+            current_start + timedelta(days=chunk_days) - timedelta(days=1),
+            end_date,
+        )
         success = False
 
         for attempt in range(retries):
@@ -63,8 +67,30 @@ def download_stock_history_in_chunks(
                     raise RuntimeError(
                         f"OpenAlgo history request failed: {error_message}"
                     )
-                if not df_chunk.empty:
-                    all_chunks.append(df_chunk)
+                if df_chunk.empty:
+                    if all_chunks:
+                        raise RuntimeError(
+                            "OpenAlgo returned an empty chunk after history had "
+                            "already started; refusing a gapped dataset"
+                        )
+                    logger.info(
+                        "[%s] No history in pre-listing range %s to %s; "
+                        "continuing to next chunk.",
+                        ticker,
+                        current_start,
+                        current_end,
+                    )
+                    success = True
+                    break
+
+                all_chunks.append(df_chunk)
+                logger.info(
+                    "[%s] Received %d candles for range %s to %s.",
+                    ticker,
+                    len(df_chunk),
+                    current_start,
+                    current_end,
+                )
                 success = True
                 break
             except Exception as exc:
@@ -92,7 +118,10 @@ def download_stock_history_in_chunks(
         current_start = current_end + timedelta(days=1)
 
     if not all_chunks:
-        logger.warning("[%s] OpenAlgo returned no historical candles.", ticker)
+        logger.warning(
+            "[%s] No history was available in any requested chunk; skipping ticker.",
+            ticker,
+        )
         return None
 
     return merge_ohlcv_history(pd.concat(all_chunks))
