@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import torch
 
+from trade_ai.config.trading_config import barrier_percentages
 from trade_ai.logger import logger
 from trade_ai.model.dataStore import dataStore
 from trade_ai.openalgo.openalgo_client import TYPE_OPENALGO_EXCHANGE, openalgo
@@ -24,6 +25,7 @@ from .training.gru_sequence_builder import (
     DEFAULT_SEQUENCE_LENGTH,
     latest_session_sequence,
 )
+from .training.trading_env import UNIFIED_ACTIONS, build_meta_observation
 
 MAX_PREDICTION_LOOKBACK_SESSIONS = 90
 
@@ -40,89 +42,143 @@ def predict(
     raw_df: pd.DataFrame,
     ticker: str,
     sequence_length: int = DEFAULT_SEQUENCE_LENGTH,
+    portfolio_position: float = 0.0,
+    unrealized_return: float = 0.0,
+    bars_in_position: int = 0,
+    barrier_multiplier: float = 1.0,
 ) -> tuple[int, float, dict]:
     """Generate an ensemble prediction without changing loaded model state."""
     normalized_df = merge_ohlcv_history(raw_df)
-    return _predict_normalized(normalized_df, ticker, sequence_length)
+    return _predict_normalized(
+        normalized_df,
+        ticker,
+        sequence_length,
+        portfolio_position,
+        unrealized_return,
+        bars_in_position,
+        barrier_multiplier,
+    )
 
 
 def _predict_normalized(
     raw_df: pd.DataFrame,
     ticker: str,
     sequence_length: int,
+    portfolio_position: float = 0.0,
+    unrealized_return: float = 0.0,
+    bars_in_position: int = 0,
+    barrier_multiplier: float = 1.0,
 ) -> tuple[int, float, dict]:
-    """Run the model ensemble on chronological, deduplicated OHLCV rows."""
+    """Run all four frozen specialists and the policy on chronological candles."""
     model_manager = get_model_manager()
-    lgb_model = model_manager.get_model("lgb")
-    gru_model = model_manager.get_model("gru")
-
-    if lgb_model is None and gru_model is None:
-        logger.warning("No trained models are loaded.")
-        return 0, 0.0, {"error": "Models not loaded"}
+    model_keys = ("long_lgb", "long_gru", "short_lgb", "short_gru")
+    models = {key: model_manager.get_model(key) for key in model_keys}
+    missing_models = [key for key, model in models.items() if model is None]
+    if missing_models:
+        logger.warning("Base models are not loaded: %s", ", ".join(missing_models))
+        return 0, 0.0, {"error": "Base models unavailable: " + ", ".join(missing_models)}
+    meta_agent = model_manager.get_meta_agent()
+    if meta_agent is None:
+        return 0, 0.0, {"error": "Validated RL meta-agent is not available"}
 
     df_lgb_feat = compute_normalized_features(raw_df, ticker, model_type="lgb")
     df_gru_feat = compute_normalized_features(raw_df, ticker, model_type="gru")
-
-    lgb_feature_cols = list(LGB_MODEL_INPUT_COLUMNS)
-    gru_feature_cols = list(GRU_MODEL_INPUT_COLUMNS)
-
-    if df_lgb_feat.empty:
+    if df_lgb_feat.empty or df_gru_feat.empty:
         return 0, 0.0, {"error": "Insufficient data after feature warmup"}
 
-    latest_snapshot = df_lgb_feat[lgb_feature_cols].iloc[[-1]]
+    latest_lgb = df_lgb_feat[list(LGB_MODEL_INPUT_COLUMNS)].iloc[[-1]]
     sequence_features = latest_session_sequence(
         df_gru_feat,
-        gru_feature_cols,
+        list(GRU_MODEL_INPUT_COLUMNS),
         sequence_length=sequence_length,
     )
+    if sequence_features is None:
+        return (
+            0,
+            0.0,
+            {"error": f"Newest session has fewer than {sequence_length} valid GRU rows"},
+        )
 
-    lgb_probs = None
-    gru_probs = None
-
-    if isinstance(lgb_model, lgb.Booster):
-        raw_lgb_pred = lgb_model.predict(latest_snapshot)
-        pred_arr = np.asarray(raw_lgb_pred)
-        if pred_arr.ndim > 0 and len(pred_arr) > 0:
-            lgb_probs = pred_arr[0] if pred_arr.ndim > 1 else pred_arr
-
-    if isinstance(gru_model, GRUTradingBrain) and sequence_features is not None:
-        with torch.inference_mode():
+    probabilities: dict[str, np.ndarray] = {}
+    with torch.inference_mode():
+        for direction in ("long", "short"):
+            lgb_model = models[f"{direction}_lgb"]
+            gru_model = models[f"{direction}_gru"]
+            if not isinstance(lgb_model, lgb.Booster) or not isinstance(
+                gru_model, GRUTradingBrain
+            ):
+                return 0, 0.0, {"error": f"{direction} model types are invalid"}
+            lgb_values = np.asarray(lgb_model.predict(latest_lgb), dtype=np.float64)
+            lgb_values = lgb_values[0] if lgb_values.ndim > 1 else lgb_values
             x_tensor = (
                 torch.tensor(sequence_features, dtype=torch.float32)
                 .unsqueeze(0)
                 .to(model_manager.device)
             )
-            logits = gru_model(x_tensor)
-            gru_probs = torch.softmax(logits, dim=1).cpu().numpy()[0]
-    elif isinstance(gru_model, GRUTradingBrain):
-        logger.warning(
-            "Newest session has fewer than %d valid rows for GRU inference.",
-            sequence_length,
-        )
+            gru_values = torch.softmax(gru_model(x_tensor), dim=1).cpu().numpy()[0]
+            probabilities[f"{direction}_lgb"] = np.asarray(lgb_values, dtype=np.float64)
+            probabilities[f"{direction}_gru"] = np.asarray(gru_values, dtype=np.float64)
 
-    if lgb_probs is not None and gru_probs is not None:
-        final_probs = (0.5 * lgb_probs) + (0.5 * gru_probs)
-    elif lgb_probs is not None:
-        final_probs = lgb_probs
-    elif gru_probs is not None:
-        final_probs = gru_probs
-    else:
-        return (
-            0,
-            0.0,
-            {
-                "error": "No inference result; newest session lacks a complete GRU sequence"
-            },
+    latest = df_lgb_feat.iloc[-1]
+    try:
+        observation = build_meta_observation(
+            probabilities,
+            float(latest["ATR_14_1m"]),
+            float(latest["Vol_Ratio_10_30_1m"]),
+            portfolio_position,
+            unrealized_return,
+            bars_in_position,
+            barrier_multiplier,
         )
+        raw_action, _ = meta_agent.predict(observation, deterministic=True)
+        action_index = int(np.asarray(raw_action).reshape(-1)[0])
+        if not 0 <= action_index < len(UNIFIED_ACTIONS):
+            raise ValueError("RL agent returned an action outside its schema")
+    except Exception as error:
+        logger.exception("RL meta-agent inference failed for %s", ticker)
+        return 0, 0.0, {"error": f"RL meta-agent inference failed: {error!s}"}
 
-    class_mapping = {0: -1, 1: 0, 2: 1}
-    best_class_idx = int(np.argmax(final_probs))
-    signal = class_mapping[best_class_idx]
-    confidence = float(final_probs[best_class_idx])
+    position, selected_barrier_multiplier = UNIFIED_ACTIONS[action_index]
+    position = float(position)
+    effective_barrier_multiplier: float | None = None
+    if position:
+        effective_barrier_multiplier = selected_barrier_multiplier
+        if portfolio_position and np.sign(position) == np.sign(portfolio_position):
+            effective_barrier_multiplier = barrier_multiplier
+    take_profit_pct: float | None = None
+    stop_loss_pct: float | None = None
+    if position:
+        assert effective_barrier_multiplier is not None
+        take_profit_pct, stop_loss_pct = barrier_percentages(
+            "long" if position > 0 else "short",
+            effective_barrier_multiplier,
+        )
+    signal = 1 if position > 0 else -1 if position < 0 else 0
+    long_probs = 0.5 * (probabilities["long_lgb"] + probabilities["long_gru"])
+    short_probs = 0.5 * (probabilities["short_lgb"] + probabilities["short_gru"])
+    confidence = (
+        float(long_probs[2])
+        if signal > 0
+        else float(short_probs[2])
+        if signal < 0
+        else 0.0
+    )
     breakdown = {
-        "lgb_probabilities": lgb_probs.tolist() if lgb_probs is not None else None,
-        "gru_probabilities": gru_probs.tolist() if gru_probs is not None else None,
-        "ensemble_probabilities": final_probs.tolist(),
+        # Keep the previous response keys as aliases for the long specialists.
+        "lgb_probabilities": probabilities["long_lgb"].tolist(),
+        "gru_probabilities": probabilities["long_gru"].tolist(),
+        "ensemble_probabilities": long_probs.tolist(),
+        "long_lgb_probabilities": probabilities["long_lgb"].tolist(),
+        "long_gru_probabilities": probabilities["long_gru"].tolist(),
+        "short_lgb_probabilities": probabilities["short_lgb"].tolist(),
+        "short_gru_probabilities": probabilities["short_gru"].tolist(),
+        "long_ensemble_probabilities": long_probs.tolist(),
+        "short_ensemble_probabilities": short_probs.tolist(),
+        "meta_action": action_index,
+        "position_size": abs(position),
+        "barrier_multiplier": effective_barrier_multiplier,
+        "take_profit_pct": take_profit_pct,
+        "stop_loss_pct": stop_loss_pct,
     }
     return signal, confidence, breakdown
 
@@ -132,6 +188,10 @@ async def predict_with_history(
     exchange: TYPE_OPENALGO_EXCHANGE,
     supplied_candles: list[dict[str, Any]] | None,
     sessions: int = 30,
+    portfolio_position: float = 0.0,
+    unrealized_return: float = 0.0,
+    bars_in_position: int = 0,
+    barrier_multiplier: float = 1.0,
 ) -> tuple[pd.DataFrame, int, float, dict[str, Any]]:
     """Fetch prior history, combine target-day candles, and run inference."""
     try:
@@ -179,7 +239,15 @@ async def predict_with_history(
 
         # Prediction-day candles are transient; dataStore retains prior sessions only.
         combined = await asyncio.to_thread(merge_ohlcv_history, history, supplied_frame)
-        return await asyncio.to_thread(predict_from_dataframe, ticker, combined)
+        return await asyncio.to_thread(
+            predict_from_dataframe,
+            ticker,
+            combined,
+            portfolio_position,
+            unrealized_return,
+            bars_in_position,
+            barrier_multiplier,
+        )
     except PredictionError:
         raise
     except Exception as error:
@@ -188,17 +256,32 @@ async def predict_with_history(
 
 
 def predict_from_dataframe(
-    ticker: str, df: pd.DataFrame
+    ticker: str,
+    df: pd.DataFrame,
+    portfolio_position: float = 0.0,
+    unrealized_return: float = 0.0,
+    bars_in_position: int = 0,
+    barrier_multiplier: float = 1.0,
 ) -> tuple[pd.DataFrame, int, float, dict[str, Any]]:
     """Run inference on a pre-merged chronological candle frame."""
     signal, confidence, breakdown = _predict_normalized(
         df,
         ticker,
         DEFAULT_SEQUENCE_LENGTH,
+        portfolio_position,
+        unrealized_return,
+        bars_in_position,
+        barrier_multiplier,
     )
     if "error" in breakdown:
         message = str(breakdown["error"])
-        status_code = 503 if message == "Models not loaded" else 422
+        status_code = (
+            503
+            if "unavailable" in message or "meta-agent" in message
+            else 422
+            if "Insufficient" in message or "fewer than" in message
+            else 500
+        )
         raise PredictionError(message, status_code)
     logger.info(
         "Prediction result for %s: signal=%s, confidence=%.4f, "

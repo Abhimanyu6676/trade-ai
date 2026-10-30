@@ -1,22 +1,44 @@
 # trade-ai
 
-`trade-ai` forecasts market direction from one-minute OHLCV candles. It fetches history through OpenAlgo, calculates multi-timeframe features, and supports a three-class LightGBM and GRU ensemble. FastAPI exposes prediction, history, and analyser-status endpoints using a typed `UniversalServerResponse` envelope.
+`trade-ai` forecasts long and short trade outcomes from one-minute OHLCV
+candles. It fetches history through OpenAlgo, calculates multi-timeframe
+features, and runs four three-class specialists (long/short LightGBM and GRU)
+through one PPO meta-agent. FastAPI exposes prediction, history, and
+analyser-status endpoints using a typed `UniversalServerResponse` envelope.
 
-The project produces model forecasts only. It does not place or manage broker orders. A probability score is not a calibrated guarantee of prediction quality.
+The service returns a decision signal and position-size suggestion. It does not
+submit or manage broker orders. Model probabilities and confidence are not
+calibrated guarantees of future performance.
 
 ## Pipeline
 
-1. **Data ingestion:** OpenAlgo returns one-minute candle history. Inference adds 30 calendar days before the requested display range for feature warm-up, orders candles by timestamp, resolves duplicate timestamps in favor of later rows, and limits processing to 25,000 rows.
-2. **Feature engineering:** The pipeline calculates return features and RSI, ATR, EMA-distance, FVG, and liquidity-sweep features over 1m, 3m, 5m, 15m, 30m, and 1h intervals. GRU RSI is scaled to 0–1; LightGBM RSI uses its regular scale.
-3. **Labeling:** Training labels are `-1` (stop-loss first), `0` (timeout), or `1` (take-profit first). Label horizons stay within one calendar date and end before the configured 15:15 market close.
-4. **Training:** The master trainer trains LightGBM first, then the PyTorch GRU. Run it directly from the command line.
-5. **Inference:** The engine combines model probabilities 50/50 when both models return results, and falls back to the available model if only one is ready.
+1. **Data ingestion:** OpenAlgo supplies one-minute candle history. Inference
+   includes at least 30 prior trading sessions, sorts candles chronologically,
+   resolves duplicates in favor of later rows, and accepts at most 25,000
+   caller-supplied candles.
+2. **Feature engineering:** Both directions use shared multi-timeframe returns,
+   RSI, ATR, EMA-distance, FVG, sweep, and volatility-ratio features. Raw OHLCV
+   values remain calculation inputs and are excluded from model inputs.
+3. **Labeling:** Long and short use mirrored +1%/−0.5% and −1%/+0.5% barriers.
+   Labels are trade-relative: `-1` stop loss, `0` timeout, `1` take profit.
+4. **Training:** All configured tickers with usable history share chronological
+   55/15/20/10 fitting, selection, walk-forward OOS, and final-holdout periods.
+   The PPO meta-agent trains and selects on frozen base-model OOS forecasts;
+   its final-holdout report does not decide whether the policy is saved.
+5. **Inference:** The meta-agent receives all four probability vectors, their
+   agreement, volatility, and optional portfolio state. It selects flat, long,
+   or short exposure, a size multiplier, and a bracket multiplier of 0.75,
+   1.0, or 1.25. The bracket multiplier scales both the baseline target and
+   stop by the same amount, preserving the 2:1 ratio used by the labels. ATR
+   is relative volatility context and does not define the bracket distances.
 
-GRU training and app inference share a 30-candle sequence-length setting. See [context.md](context.md) for implementation details and known limitations.
+GRU training and inference share a 30-candle sequence length. See
+[context.md](context.md) for architecture, data contracts, and known limits.
 
 ## Getting Started
 
-See [setup-start.md](setup-start.md) for requirements, dependency setup, environment configuration, startup, training, and troubleshooting.
+See [setup-start.md](setup-start.md) for requirements, dependency setup,
+environment configuration, startup, training, and troubleshooting.
 
 Quick commands from the repository root:
 
@@ -25,62 +47,49 @@ uv sync
 uv run python src/trade_ai/app.py
 ```
 
-The app loads values from the repository-root `.env` and validates all configured application settings before startup. Values already set in the shell take precedence. See [setup-start.md](setup-start.md) for the required settings.
-
-Run the full dual-model training pipeline in the foreground with:
+The full training command trains all four base specialists and the common
+meta-agent:
 
 ```sh
-uv run python -m trade_ai.model.training.train_master
+uv run python -m trade_ai.model.training.train_master both all
 ```
 
 ## Project Structure
 
 ```text
 trade-ai/
-├── agents.md                         # Agent workflow and documentation maintenance rules
-├── context.md                        # Current architecture, contracts, and known limitations
+├── AGENTS.md                         # Agent workflow and documentation rules
+├── context.md                        # Architecture, contracts, and limitations
 ├── readme.md                         # Project overview and structure
-├── setup-start.md                    # Installation, environment, startup, and troubleshooting
+├── setup-start.md                    # Installation, startup, and training
 ├── pyproject.toml                    # Project metadata and dependencies
 ├── uv.lock                           # Locked dependency versions
-├── .python-version                   # Python version requirement
-├── nodemon.json                      # Optional development restart configuration
 └── src/trade_ai/
-    ├── __init__.py                   # Package entry point
-    ├── app.py                        # Loads prediction models and starts the API
-    ├── logger.py                     # Shared project logging configuration
-    ├── openalgo/                     # OpenAlgo client, types, and conversion helpers
-    ├── util.py                       # Candle conversion, merge, and resampling helpers
+    ├── app.py                        # Loads artifacts and starts FastAPI
+    ├── config/trading_config.py      # Trading rules, costs, and artifact paths
+    ├── openalgo/                     # OpenAlgo client, types, conversions
     ├── model/
-    │   ├── stock_metadata.py         # Ticker metadata and encoded categories
-    │   ├── features.py                # Multi-timeframe model features
-    │   ├── training/
-    │   │   ├── gru_sequence_builder.py     # Same-calendar-date GRU sequence helpers
-    │   │   ├── gru_sequence_builder.md    # Session and sequence boundary notes
-    │   │   ├── labels.py              # Triple Barrier labels for training
-    │   │   ├── train_lgb.py           # LightGBM data preparation and trainer
-    │   │   ├── train_gru.py           # GRU training and session-safe dataset
-    │   │   └── train_master.py        # Selective model-training orchestration
-    │   ├── models.py                  # Model architecture, loaded instances, and lifecycle
-    │   ├── prediction_engine.py       # Prediction history, orchestration, blending, and inference
-    │   ├── prediction_engine.md       # Ensemble behavior notes
-    ├── indicator/
-    │   ├── *.py                       # Indicator implementations
-    │   └── *.md                       # Indicator documentation
-    ├── server/
-    │   ├── server.py                  # FastAPI server entry point
-    │   ├── predict_route.py            # Structured prediction request route
-    │   ├── openalgo_route.py          # OpenAlgo history and analyser routes
-    │   ├── serverTypes.py              # Generic endpoint response envelope
-    │   └── server.md                 # API endpoint notes
-    └── strategy/
-        └── strategy.md               # Strategy notes
+    │   ├── features.py               # Shared multi-timeframe model features
+    │   ├── models.py                 # Four specialists, PPO, lifecycle
+    │   ├── prediction_engine.py      # History orchestration and policy inference
+    │   └── training/
+    │       ├── long/                 # Long labels, trainers, env wrapper
+    │       ├── short/                # Short labels, trainers, env wrapper
+    │       ├── rl/                   # OOS predictions and PPO support
+    │       ├── train_gru.py          # Shared directional GRU trainer
+    │       ├── train_lgb.py          # Shared directional LightGBM trainer
+    │       ├── train_rl.py           # Unified PPO training
+    │       ├── trading_env.py        # Historical PPO environment
+    │       ├── train_master.py       # Direction/component CLI orchestration
+    │       └── training.md           # Training lifecycle and commands
+    ├── indicator/                   # Technical indicator implementations
+    ├── server/                      # FastAPI routes and API guidebook
+    └── strategy/                    # Strategy design notes
 ```
 
-Each FastAPI endpoint returns the generic `UniversalServerResponse` envelope:
-`intent`, then `data.eventType`, with a successful payload in `data.data` or an
-error in `data.error`. Endpoint payload and error contracts are kept in the
-corresponding `*Types.py` module; global intents and events are in
-`universalTypes.py`.
-
-Training caches and model checkpoints are runtime files under `src/trade_ai/model/training/tickData/` and `src/trade_ai/model/.run_cache/` when generated; they are not part of the source tree. The prediction history request also caps processing at 25,000 rows; this is not a 10-million-row batch-processing loop.
+The API response envelope is `intent` plus `data.eventType`, with successful
+payloads in `data.data` and errors in `data.error`. Runtime candle caches and
+model artifacts live under `src/trade_ai/model/training/tickData/` and
+`src/trade_ai/model/.run_cache/`; they are not source files. The application can
+start without trained artifacts, but prediction returns HTTP 503 until all four
+base models and a compatible PPO policy are available.

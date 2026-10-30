@@ -1,4 +1,6 @@
 import os
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 import numpy as np
 import pandas as pd
@@ -6,9 +8,11 @@ import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader, Dataset
 
+from trade_ai.config.trading_config import SCHEMA_VERSION, Direction, model_artifact_paths
 from trade_ai.logger import logger
-from trade_ai.model.models import GRU_MODEL_PATH, GRUTradingBrain
+from trade_ai.model.models import GRUTradingBrain
 from trade_ai.model.stock_metadata import STOCK_METADATA
+from trade_ai.openalgo.openalgo_client import openalgo
 
 from ..features import (
     FEATURE_SCHEMA_VERSION,
@@ -20,20 +24,38 @@ from .gru_sequence_builder import (
     session_dates,
     valid_window_starts,
 )
-from .labels import (
+from .labeling import (
     LABEL_SCHEMA_VERSION,
     MAX_HOLDING_PERIOD,
     apply_triple_barrier,
 )
-from .util import load_or_fetch_stock_data
-
-# Directory and path configurations
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-CACHE_DIR = os.path.join(BASE_DIR, ".run_cache")
+from .rl.oos_data import write_oos_predictions
+from .util import (
+    eligible_session_dates,
+    global_walk_forward_plan,
+    load_or_fetch_stock_data,
+)
 
 MIN_EPOCHS = 5
 MAX_EPOCHS = 20
 EARLY_STOPPING_PATIENCE = 3
+
+
+def _atomic_torch_save(checkpoint: dict[str, object], path: Path) -> None:
+    """Save a GRU checkpoint in place only after serialization completes."""
+    temporary_path: str | None = None
+    try:
+        with NamedTemporaryFile(
+            suffix=path.suffix,
+            dir=path.parent,
+            delete=False,
+        ) as temporary_file:
+            temporary_path = temporary_file.name
+        torch.save(checkpoint, temporary_path)
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path and os.path.exists(temporary_path):
+            os.unlink(temporary_path)
 
 
 # --- 2. Memory-Efficient Sliding Window Dataset ---
@@ -85,85 +107,170 @@ class SlidingWindowDataset(Dataset):
         return x_seq, y_val
 
 
-def _prepare_ticker_datasets(
-    ticker: str,
+GRUDatasetPartition = dict[str, tuple[SlidingWindowDataset, pd.DataFrame]]
+
+
+def _collect_gru_partitions(
+    direction: Direction,
     feature_cols: list[str],
     sequence_length: int,
-    log_split: bool = False,
-) -> tuple[SlidingWindowDataset, SlidingWindowDataset] | None:
-    """Build chronological train and validation windows for one ticker."""
-    raw_df = load_or_fetch_stock_data(ticker)
-    if raw_df is None or raw_df.empty:
-        logger.warning("Skipping %s: Data unavailable.", ticker)
-        return None
+    requests: dict[
+        str,
+        tuple[pd.Timestamp | None, pd.Timestamp | None, bool, bool],
+    ],
+) -> dict[str, GRUDatasetPartition]:
+    """Build named chronological datasets across every configured ticker.
 
-    df_feat = compute_normalized_features(raw_df, ticker, model_type="gru")
-    df_feat = df_feat.reset_index(drop=True)
-    df_feat["target"] = apply_triple_barrier(
-        df=df_feat,
-        timestamp_col="timestamp",
-        close_col="close",
-        max_holding_period=MAX_HOLDING_PERIOD,
-        start_hour=10,
-        start_minute=0,
-        end_hour=14,
-        end_minute=30,
-    )
-
-    # Keep unlabeled rows as sequence context, while splitting labeled endpoints.
-    df_clean = df_feat.dropna(subset=["timestamp"]).copy()
-    features_np = df_clean[feature_cols].to_numpy(dtype=np.float32)
-    targets_series = pd.to_numeric(df_clean["target"], errors="coerce")
-    targets_np = np.asarray(targets_series, dtype=np.float32)
-    dates_np = session_dates(df_clean["timestamp"])
-    labeled_indices = np.where(np.isfinite(targets_np))[0]
-    split_idx = int(len(labeled_indices) * 0.8)
-    if split_idx == 0 or split_idx == len(labeled_indices):
-        logger.warning(
-            "Skipping %s: not enough labeled rows for train and validation.", ticker
+    Requests use (start_date, end_date, purge_before_end, include_metadata).
+    A single feature tensor is shared by all requested ranges for each ticker.
+    """
+    partitions: dict[str, GRUDatasetPartition] = {name: {} for name in requests}
+    for ticker in STOCK_METADATA:
+        raw_frame = load_or_fetch_stock_data(ticker)
+        if raw_frame is None or raw_frame.empty:
+            logger.warning("Skipping %s: data unavailable.", ticker)
+            continue
+        feature_frame = compute_normalized_features(
+            raw_frame, ticker, model_type="gru"
+        ).reset_index(drop=True)
+        feature_frame["target"] = apply_triple_barrier(
+            feature_frame,
+            direction=direction,
+            max_holding_period=MAX_HOLDING_PERIOD,
         )
-        return None
+        del raw_frame
 
-    validation_start_row = int(labeled_indices[split_idx])
-    train_end_row = validation_start_row - MAX_HOLDING_PERIOD
-    row_indices = np.arange(len(targets_np))
-    train_targets = targets_np.copy()
-    train_targets[(row_indices >= train_end_row) | ~np.isfinite(train_targets)] = np.nan
-    val_targets = targets_np.copy()
-    val_targets[(row_indices < validation_start_row) | ~np.isfinite(val_targets)] = (
-        np.nan
-    )
+        df_clean = feature_frame.dropna(subset=["timestamp"])
+        features_np = df_clean[feature_cols].to_numpy(dtype=np.float32)
+        targets_np = pd.to_numeric(
+            df_clean["target"], errors="coerce"
+        ).to_numpy(dtype=np.float32)
+        dates_np = session_dates(df_clean["timestamp"])
+        timestamps = pd.to_datetime(df_clean["timestamp"])
+        row_indices = np.arange(len(targets_np))
+        features_tensor = torch.tensor(features_np, dtype=torch.float32)
 
-    # Share features between train and validation datasets to limit memory use.
-    features_tensor = torch.tensor(features_np, dtype=torch.float32)
-    train_dataset = SlidingWindowDataset(
-        features_tensor, train_targets, dates_np, sequence_length
-    )
-    val_dataset = SlidingWindowDataset(
-        features_tensor, val_targets, dates_np, sequence_length
-    )
-    if len(train_dataset) == 0 or len(val_dataset) == 0:
-        logger.warning(
-            "Skipping %s: no complete train or validation sequences after the "
-            "%d-row purge.",
-            ticker,
-            MAX_HOLDING_PERIOD,
-        )
-        return None
+        for name, (start_date, end_date, purge_before_end, include_metadata) in requests.items():
+            start_row = (
+                int(timestamps.searchsorted(start_date)) if start_date is not None else 0
+            )
+            end_row = (
+                int(timestamps.searchsorted(end_date))
+                if end_date is not None
+                else len(df_clean)
+            )
+            if purge_before_end:
+                end_row = max(start_row, end_row - MAX_HOLDING_PERIOD)
+            selected_targets = targets_np.copy()
+            selected_targets[
+                (row_indices < start_row)
+                | (row_indices >= end_row)
+                | ~np.isfinite(selected_targets)
+            ] = np.nan
+            dataset = SlidingWindowDataset(
+                features_tensor,
+                selected_targets,
+                dates_np,
+                sequence_length,
+            )
+            if not len(dataset):
+                continue
+            metadata = pd.DataFrame()
+            if include_metadata:
+                target_indices = dataset.window_starts + sequence_length - 1
+                metadata = df_clean.iloc[target_indices][
+                    ["timestamp", "close", "ATR_14_1m", "Vol_Ratio_10_30_1m"]
+                ].copy()
+                metadata.insert(0, "ticker", ticker)
+            partitions[name][ticker] = (dataset, metadata)
+        del feature_frame
 
-    if log_split:
+    for name, partition in partitions.items():
         logger.info(
-            "[%s] Split: labeled_rows=%d purged_rows=%d train_sequences=%d "
-            "val_sequences=%d train_classes=%s val_classes=%s",
-            ticker,
-            len(labeled_indices),
-            MAX_HOLDING_PERIOD,
-            len(train_dataset),
-            len(val_dataset),
-            train_dataset.class_counts(),
-            val_dataset.class_counts(),
+            "%s GRU partition %s: sequences=%d tickers=%d",
+            direction,
+            name,
+            sum(len(dataset) for dataset, _ in partition.values()),
+            len(partition),
         )
-    return train_dataset, val_dataset
+    return partitions
+
+
+def _fit_gru_fixed_epochs(
+    train_partition: GRUDatasetPartition,
+    input_dim: int,
+    epochs: int,
+    batch_size: int,
+    learning_rate: float,
+    device: torch.device,
+    seed: int,
+) -> GRUTradingBrain:
+    """Fit a fresh GRU for a fixed epoch count on all available train tickers."""
+    torch.manual_seed(seed)
+    model = GRUTradingBrain(
+        input_dim=input_dim, hidden_dim=64, num_layers=2, num_classes=3
+    ).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    criterion = nn.CrossEntropyLoss()
+    for epoch in range(epochs):
+        model.train()
+        total_loss = 0.0
+        total_samples = 0
+        for ticker in sorted(train_partition):
+            dataset, _ = train_partition[ticker]
+            loader = DataLoader(
+                dataset, batch_size=batch_size, shuffle=True, drop_last=False
+            )
+            for batch_X, batch_y in loader:
+                batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+                optimizer.zero_grad()
+                loss = criterion(model(batch_X), batch_y)
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item() * len(batch_y)
+                total_samples += len(batch_y)
+        if not total_samples:
+            raise RuntimeError("GRU refit has no labeled training sequences")
+        logger.info(
+            "Fixed-epoch GRU refit epoch %d/%d: loss=%.4f sequences=%d",
+            epoch + 1,
+            epochs,
+            total_loss / total_samples,
+            total_samples,
+        )
+    model.eval()
+    return model
+
+
+def _predict_gru_partition(
+    model: GRUTradingBrain,
+    partition: GRUDatasetPartition,
+    batch_size: int,
+    device: torch.device,
+) -> tuple[pd.DataFrame, np.ndarray]:
+    """Return probabilities and endpoint metadata in matching ticker order."""
+    metadata_parts: list[pd.DataFrame] = []
+    probability_parts: list[np.ndarray] = []
+    model.eval()
+    with torch.inference_mode():
+        for ticker in sorted(partition):
+            dataset, metadata = partition[ticker]
+            loader = DataLoader(
+                dataset, batch_size=batch_size, shuffle=False, drop_last=False
+            )
+            batches: list[np.ndarray] = []
+            for batch_X, _ in loader:
+                logits = model(batch_X.to(device))
+                batches.append(torch.softmax(logits, dim=1).cpu().numpy())
+            if batches:
+                metadata_parts.append(metadata)
+                probability_parts.append(np.concatenate(batches, axis=0))
+    if not metadata_parts:
+        raise RuntimeError("GRU prediction partition produced no sequences")
+    return (
+        pd.concat(metadata_parts, ignore_index=True),
+        np.concatenate(probability_parts, axis=0),
+    )
 
 
 def _evaluate_dataset(
@@ -193,24 +300,27 @@ def _evaluate_dataset(
 
 # --- 3. Main GRU Training Pipeline ---
 def train_gru_model(
+    direction: Direction = "long",
     epochs: int = MAX_EPOCHS,
     sequence_length: int = DEFAULT_SEQUENCE_LENGTH,
     batch_size: int = 256,
     learning_rate: float = 0.001,
 ):
-    """Train with chronological validation and early stopping after the minimum."""
+    """Select GRU epochs, create expanding OOS forecasts, then refit for inference."""
     if not MIN_EPOCHS <= epochs <= MAX_EPOCHS:
         raise ValueError(f"epochs must be between {MIN_EPOCHS} and {MAX_EPOCHS}")
     if sequence_length < 1 or batch_size < 1:
         raise ValueError("sequence_length and batch_size must be at least 1")
 
+    model_path, _ = model_artifact_paths(direction, "gru")
     openalgo.initiate()
-    os.makedirs(CACHE_DIR, exist_ok=True)
+    model_path.parent.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info("🚀 Initializing GRU Training Pipeline on device: %s", device)
+    logger.info("Initializing %s GRU training pipeline on device: %s", direction, device)
 
     tickers = list(STOCK_METADATA.keys())
     feature_cols = list(GRU_MODEL_INPUT_COLUMNS)
+    torch.manual_seed(42)
     model = GRUTradingBrain(
         input_dim=len(feature_cols), hidden_dim=64, num_layers=2, num_classes=3
     ).to(device)
@@ -219,26 +329,37 @@ def train_gru_model(
     best_epoch = 0
     criterion = nn.CrossEntropyLoss()
 
-    # Feature and label preparation is deterministic for a given history. Keep
-    # each ticker's datasets in memory so every epoch only performs GRU work.
-    prepared_datasets: dict[str, tuple[SlidingWindowDataset, SlidingWindowDataset]] = {}
+    # One shared date plan covers all tickers; ticker rows are never randomized
+    # into different time periods.
+    all_session_dates: set[pd.Timestamp] = set()
     for ticker in tickers:
-        logger.info("Preparing GRU datasets for %s...", ticker)
-        datasets = _prepare_ticker_datasets(
-            ticker, feature_cols, sequence_length, log_split=True
-        )
-        if datasets is not None:
-            prepared_datasets[ticker] = datasets
-
-    if not prepared_datasets:
-        raise RuntimeError(
-            "No valid GRU training and validation datasets were prepared."
-        )
-    logger.info(
-        "Prepared GRU datasets for %d/%d tickers; reusing them across epochs.",
-        len(prepared_datasets),
-        len(tickers),
+        logger.info("Collecting eligible session dates for %s...", ticker)
+        raw_frame = load_or_fetch_stock_data(ticker)
+        if raw_frame is None or raw_frame.empty:
+            logger.warning("Skipping %s: data unavailable.", ticker)
+            continue
+        all_session_dates.update(eligible_session_dates(raw_frame))
+    if not all_session_dates:
+        raise RuntimeError("No eligible GRU training session dates were prepared.")
+    plan = global_walk_forward_plan(all_session_dates)
+    selector_partitions = _collect_gru_partitions(
+        direction,
+        feature_cols,
+        sequence_length,
+        {
+            "fit": (None, plan.validation_start, True, False),
+            "validation": (
+                plan.validation_start,
+                plan.oos_start,
+                True,
+                False,
+            ),
+        },
     )
+    selector_train = selector_partitions["fit"]
+    selector_validation = selector_partitions["validation"]
+    if not selector_train or not selector_validation:
+        raise RuntimeError("No valid GRU fit and selection datasets were prepared.")
 
     for epoch in range(epochs):
         logger.info("--- Starting Epoch %d/%d ---", epoch + 1, epochs)
@@ -246,11 +367,8 @@ def train_gru_model(
         train_correct = 0
         train_samples = 0
 
-        for ticker in tickers:
-            datasets = prepared_datasets.get(ticker)
-            if datasets is None:
-                continue
-            train_dataset, _ = datasets
+        for ticker in sorted(selector_train):
+            train_dataset, _ = selector_train[ticker]
             dataloader = DataLoader(
                 train_dataset, batch_size=batch_size, shuffle=True, drop_last=False
             )
@@ -290,15 +408,12 @@ def train_gru_model(
         if train_samples == 0:
             raise RuntimeError(f"No valid GRU training sequences in epoch {epoch + 1}.")
 
-        # Evaluate one ticker at a time using its cached validation dataset.
+        # Validation rows select the epoch count; they are not used to score PPO.
         val_loss_sum = 0.0
         val_correct = 0
         val_samples = 0
-        for ticker in tickers:
-            datasets = prepared_datasets.get(ticker)
-            if datasets is None:
-                continue
-            _, val_dataset = datasets
+        for ticker in sorted(selector_validation):
+            val_dataset, _ = selector_validation[ticker]
             val_loader = DataLoader(
                 val_dataset, batch_size=batch_size, shuffle=False, drop_last=False
             )
@@ -341,17 +456,8 @@ def train_gru_model(
         if val_loss < best_validation_loss:
             best_validation_loss = val_loss
             best_epoch = epoch + 1
-            torch.save(
-                {
-                    "feature_schema_version": FEATURE_SCHEMA_VERSION,
-                    "label_schema_version": LABEL_SCHEMA_VERSION,
-                    "feature_columns": feature_cols,
-                    "state_dict": model.state_dict(),
-                },
-                GRU_MODEL_PATH,
-            )
             logger.info(
-                "Saved best GRU checkpoint at epoch %d (validation loss %.4f).",
+                "Selected GRU epoch %d (validation loss %.4f).",
                 best_epoch,
                 best_validation_loss,
             )
@@ -376,8 +482,119 @@ def train_gru_model(
         )
 
     logger.info(
-        "GRU training completed: best_epoch=%d best_validation_loss=%.4f checkpoint=%s",
+        "GRU epoch selection completed: best_epoch=%d validation_loss=%.4f",
         best_epoch,
         best_validation_loss,
-        GRU_MODEL_PATH,
+    )
+
+    oos_metadata_parts: list[pd.DataFrame] = []
+    oos_probability_parts: list[np.ndarray] = []
+    for fold_index, (fold_start, fold_end) in enumerate(plan.oos_folds, start=1):
+        fold_partitions = _collect_gru_partitions(
+            direction,
+            feature_cols,
+            sequence_length,
+            {
+                "fit": (None, fold_start, True, False),
+                "oos": (fold_start, fold_end, False, True),
+            },
+        )
+        fold_model = _fit_gru_fixed_epochs(
+            fold_partitions["fit"],
+            len(feature_cols),
+            best_epoch,
+            batch_size,
+            learning_rate,
+            device,
+            seed=42 + fold_index,
+        )
+        fold_metadata, fold_probabilities = _predict_gru_partition(
+            fold_model,
+            fold_partitions["oos"],
+            batch_size,
+            device,
+        )
+        fold_metadata["fold_id"] = f"fold_{fold_index}"
+        fold_metadata["model_training_cutoff"] = fold_start.date().isoformat()
+        oos_metadata_parts.append(fold_metadata)
+        oos_probability_parts.append(fold_probabilities)
+        logger.info(
+            "%s GRU walk-forward fold %d/%d: fit tickers=%d OOS rows=%d "
+            "OOS dates=%s..%s",
+            direction,
+            fold_index,
+            len(plan.oos_folds),
+            len(fold_partitions["fit"]),
+            len(fold_metadata),
+            fold_start.date(),
+            (fold_end - pd.Timedelta(days=1)).date(),
+        )
+
+    final_partitions = _collect_gru_partitions(
+        direction,
+        feature_cols,
+        sequence_length,
+        {
+            "fit": (None, plan.final_holdout_start, True, False),
+            "final": (plan.final_holdout_start, None, False, True),
+        },
+    )
+    final_model = _fit_gru_fixed_epochs(
+        final_partitions["fit"],
+        len(feature_cols),
+        best_epoch,
+        batch_size,
+        learning_rate,
+        device,
+        seed=42 + len(plan.oos_folds) + 1,
+    )
+    _atomic_torch_save(
+        {
+            "trading_schema_version": SCHEMA_VERSION,
+            "direction": direction,
+            "feature_schema_version": FEATURE_SCHEMA_VERSION,
+            "label_schema_version": LABEL_SCHEMA_VERSION,
+            "feature_columns": feature_cols,
+            "selection_best_epoch": best_epoch,
+            "selection_validation_loss": best_validation_loss,
+            "final_fit_sequences": int(
+                sum(len(dataset) for dataset, _ in final_partitions["fit"].values())
+            ),
+            "final_fit_cutoff": plan.final_holdout_start.date().isoformat(),
+            "walk_forward_folds": len(plan.oos_folds),
+            "state_dict": final_model.state_dict(),
+        },
+        model_path,
+    )
+    final_metadata, final_probabilities = _predict_gru_partition(
+        final_model,
+        final_partitions["final"],
+        batch_size,
+        device,
+    )
+    final_metadata["fold_id"] = "final_holdout"
+    final_metadata["model_training_cutoff"] = (
+        plan.final_holdout_start.date().isoformat()
+    )
+
+    write_oos_predictions(
+        direction,
+        "gru",
+        pd.concat(oos_metadata_parts, ignore_index=True),
+        np.concatenate(oos_probability_parts, axis=0),
+        partition="oos",
+    )
+    write_oos_predictions(
+        direction,
+        "gru",
+        final_metadata,
+        final_probabilities,
+        partition="final",
+    )
+    logger.info(
+        "Saved refit %s GRU checkpoint through %s after selecting %d epochs: %s",
+        direction,
+        plan.final_holdout_start.date(),
+        best_epoch,
+        model_path,
     )

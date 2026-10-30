@@ -1,149 +1,202 @@
-import json
 import os
+from dataclasses import dataclass
+from tempfile import NamedTemporaryFile
 
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
+from trade_ai.config.trading_config import (
+    SCHEMA_VERSION,
+    Direction,
+    model_artifact_paths,
+)
 from trade_ai.logger import logger
-from trade_ai.model.models import LGB_MODEL_PATH, LGB_MODEL_SCHEMA_PATH
 from trade_ai.model.stock_metadata import METADATA_FEATURE_COLUMNS, STOCK_METADATA
+from trade_ai.openalgo.openalgo_client import openalgo
 
 from ..features import (
     FEATURE_SCHEMA_VERSION,
     LGB_MODEL_INPUT_COLUMNS,
     compute_normalized_features,
 )
-from .labels import (
+from .labeling import (
     LABEL_SCHEMA_VERSION,
     MAX_HOLDING_PERIOD,
     apply_triple_barrier,
 )
-from .util import load_or_fetch_stock_data
+from .rl.oos_data import sha256_file, write_oos_predictions
+from .util import (
+    atomic_write_json,
+    eligible_session_dates,
+    global_walk_forward_plan,
+    load_or_fetch_stock_data,
+    WalkForwardPlan,
+)
 
-# Configure training paths
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-CACHE_DIR = os.path.join(BASE_DIR, ".run_cache")
+
+@dataclass
+class LightGBMPartition:
+    """One global, direction-specific partition assembled across tickers."""
+
+    features: pd.DataFrame
+    targets: pd.Series
+    metadata: pd.DataFrame
 
 
-def prepare_training_data() -> tuple[
-    pd.DataFrame,
-    pd.DataFrame,
-    pd.Series,
-    pd.Series,
-]:
-    """Iterates through all stocks, builds features and triple barrier labels,
+@dataclass
+class PreparedLightGBMData:
+    """Selector data and shared date boundaries for one directional model."""
 
-    splits each stock chronologically, purges the label look-ahead window, and
-    remaps classes to {0, 1, 2} for LightGBM.
-    """
-    all_train_features = []
-    all_val_features = []
-    all_train_targets = []
-    all_val_targets = []
+    plan: WalkForwardPlan
+    selection_train: LightGBMPartition
+    selection_validation: LightGBMPartition
 
-    tickers = list(STOCK_METADATA.keys())
 
-    for ticker in tickers:
-        logger.info("Processing feature pipeline for %s...", ticker)
+def _walk_forward_plan() -> WalkForwardPlan:
+    """Build one date plan from every ticker in the configured universe."""
+    all_session_dates: set[pd.Timestamp] = set()
+    for ticker in STOCK_METADATA:
         raw_df = load_or_fetch_stock_data(ticker)
         if raw_df is None or raw_df.empty:
             logger.warning("Skipping %s: No data available.", ticker)
             continue
+        all_session_dates.update(eligible_session_dates(raw_df))
+    if not all_session_dates:
+        raise RuntimeError("Training aborted: no eligible candle dates were found.")
+    return global_walk_forward_plan(all_session_dates)
 
-        # 1. Build multi-timeframe features
-        df_feat = compute_normalized_features(raw_df, ticker, model_type="lgb")
 
-        # Reset to a positional index so the split purge is measured in candle rows.
-        df_feat = df_feat.reset_index(drop=True)
+def _collect_partitions(
+    direction: Direction,
+    plan: WalkForwardPlan,
+    requests: dict[
+        str,
+        tuple[pd.Timestamp | None, pd.Timestamp | None, bool, bool],
+    ],
+) -> dict[str, LightGBMPartition]:
+    """Collect named date ranges in one pass over the configured ticker universe.
 
-        # 3. Generate Triple Barrier target labels (-1, 0, 1) with time filters
-        df_feat["target"] = apply_triple_barrier(
-            df=df_feat,
-            timestamp_col="timestamp",
-            close_col="close",
+    Each request is `(start_date, end_date, purge_before_end, keep_metadata)`.
+    All date boundaries are shared across tickers; rows are never sampled at
+    random. Missing or too-short ticker histories are skipped for that range.
+    """
+    feature_cols = list(LGB_MODEL_INPUT_COLUMNS)
+    features_by_name: dict[str, list[pd.DataFrame]] = {name: [] for name in requests}
+    targets_by_name: dict[str, list[pd.Series]] = {name: [] for name in requests}
+    metadata_by_name: dict[str, list[pd.DataFrame]] = {name: [] for name in requests}
+    tickers_by_name: dict[str, set[str]] = {name: set() for name in requests}
+
+    for ticker in STOCK_METADATA:
+        logger.info("Processing %s feature pipeline for %s...", direction, ticker)
+        raw_df = load_or_fetch_stock_data(ticker)
+        if raw_df is None or raw_df.empty:
+            continue
+        feature_frame = compute_normalized_features(raw_df, ticker, model_type="lgb")
+        feature_frame = feature_frame.reset_index(drop=True)
+        feature_frame["target"] = apply_triple_barrier(
+            df=feature_frame,
+            direction=direction,
             max_holding_period=MAX_HOLDING_PERIOD,
-            start_hour=10,
-            start_minute=0,
-            end_hour=14,
-            end_minute=30,
         )
-
-        # 4. Drop rows with NaN targets
-        df_clean = df_feat.dropna(subset=["target"]).copy()
-        if df_clean.empty:
-            logger.warning(
-                "Skipping %s: Insufficient rows after cleaning NaNs.", ticker
+        timestamps = pd.to_datetime(feature_frame["timestamp"])
+        row_indices = np.arange(len(feature_frame))
+        labeled_mask = feature_frame["target"].notna().to_numpy()
+        for name, (start_date, end_date, purge_before_end, keep_metadata) in requests.items():
+            start_row = (
+                int(timestamps.searchsorted(start_date)) if start_date is not None else 0
             )
-            continue
-
-        feature_cols = list(LGB_MODEL_INPUT_COLUMNS)
-
-        # Use each ticker's own chronological boundary so validation includes all
-        # tickers instead of depending on their concatenation order.
-        split_idx = int(len(df_clean) * 0.8)
-        if split_idx == 0 or split_idx == len(df_clean):
-            logger.warning(
-                "Skipping %s: not enough labeled rows for both train and validation.",
-                ticker,
+            end_row = (
+                int(timestamps.searchsorted(end_date))
+                if end_date is not None
+                else len(feature_frame)
             )
-            continue
+            if purge_before_end:
+                end_row = max(start_row, end_row - MAX_HOLDING_PERIOD)
+            mask = labeled_mask & (row_indices >= start_row) & (row_indices < end_row)
+            selected = feature_frame.loc[mask]
+            if selected.empty:
+                continue
+            tickers_by_name[name].add(ticker)
+            features_by_name[name].append(selected[feature_cols])
+            targets_by_name[name].append(selected["target"].astype(int) + 1)
+            if keep_metadata:
+                metadata = selected[
+                    ["timestamp", "close", "ATR_14_1m", "Vol_Ratio_10_30_1m"]
+                ].copy()
+                metadata.insert(0, "ticker", ticker)
+                metadata_by_name[name].append(metadata)
 
-        validation_start_row = int(df_clean.index[split_idx])
-        train_end_row = validation_start_row - MAX_HOLDING_PERIOD
-        train_df = df_clean.loc[df_clean.index < train_end_row]
-        val_df = df_clean.iloc[split_idx:]
-        if train_df.empty or val_df.empty:
-            logger.warning(
-                "Skipping %s: not enough rows after purging the %d-candle label "
-                "look-ahead window.",
-                ticker,
-                MAX_HOLDING_PERIOD,
+    result: dict[str, LightGBMPartition] = {}
+    for name in requests:
+        if not features_by_name[name]:
+            raise RuntimeError(
+                f"No LightGBM rows were available for partition {name!r}"
             )
-            continue
-
-        all_train_features.append(train_df[feature_cols])
-        all_val_features.append(val_df[feature_cols])
-        all_train_targets.append(train_df["target"].astype(int) + 1)
-        all_val_targets.append(val_df["target"].astype(int) + 1)
-
-    if not all_train_features:
-        raise RuntimeError(
-            "Training aborted: No valid data processed across any ticker."
+        features = pd.concat(features_by_name[name], ignore_index=True)
+        targets = pd.concat(targets_by_name[name], ignore_index=True)
+        metadata = (
+            pd.concat(metadata_by_name[name], ignore_index=True)
+            if metadata_by_name[name]
+            else pd.DataFrame()
         )
-
-    # Concatenate per-stock chronological horizons into global master sets
-    X_train = pd.concat(all_train_features, ignore_index=True)
-    X_val = pd.concat(all_val_features, ignore_index=True)
-    y_train = pd.concat(all_train_targets, ignore_index=True)
-    y_val = pd.concat(all_val_targets, ignore_index=True)
-
-    if X_train.empty or X_val.empty:
-        raise RuntimeError(
-            "Training aborted: the combined train or validation set is empty."
+        if len(features) != len(targets):
+            raise RuntimeError(f"LightGBM {name} features and targets are misaligned")
+        if requests[name][3] and len(features) != len(metadata):
+            raise RuntimeError(f"LightGBM {name} metadata is misaligned")
+        result[name] = LightGBMPartition(features, targets, metadata)
+        logger.info(
+            "%s %s partition: rows=%d tickers=%d dates=%d",
+            direction,
+            name,
+            len(features),
+            len(tickers_by_name[name]),
+            (
+                int(pd.to_datetime(metadata["timestamp"]).dt.normalize().nunique())
+                if not metadata.empty
+                else 0
+            ),
         )
+    return result
 
-    logger.info(
-        "Master training datasets assembled successfully via per-ticker timeline splits."
+
+def prepare_training_data(direction: Direction = "long") -> PreparedLightGBMData:
+    """Prepare chronological fit/selection slices for one directional model."""
+    plan = _walk_forward_plan()
+    partitions = _collect_partitions(
+        direction,
+        plan,
+        {
+            "selection_train": (None, plan.validation_start, True, False),
+            "selection_validation": (
+                plan.validation_start,
+                plan.oos_start,
+                True,
+                False,
+            ),
+        },
     )
-    logger.info(
-        "Train rows: %d, Val rows: %d, Features: %d",
-        len(X_train),
-        len(X_val),
-        X_train.shape[1],
+    return PreparedLightGBMData(
+        plan,
+        partitions["selection_train"],
+        partitions["selection_validation"],
     )
 
-    return X_train, X_val, y_train, y_val
 
-
-def train_lightgbm_model() -> bool:
-    """Trains the LightGBM model on the concatenated master dataset and saves artifacts."""
+def train_lightgbm_model(direction: Direction = "long") -> bool:
+    """Train a direction-specific LightGBM model and save its schema artifacts."""
+    model_path, schema_path = model_artifact_paths(direction, "lgb")
     openalgo.initiate()
-    os.makedirs(CACHE_DIR, exist_ok=True)
+    model_path.parent.mkdir(parents=True, exist_ok=True)
 
-    logger.info("🚀 Initializing LightGBM Training Pipeline...")
+    logger.info("Initializing %s LightGBM training pipeline.", direction)
 
-    X_train, X_val, y_train, y_val = prepare_training_data()
+    prepared = prepare_training_data(direction)
+    X_train = prepared.selection_train.features
+    y_train = prepared.selection_train.targets
+    X_val = prepared.selection_validation.features
+    y_val = prepared.selection_validation.targets
+    plan = prepared.plan
 
     def class_counts(targets: pd.Series) -> dict[int, int]:
         return {
@@ -190,7 +243,7 @@ def train_lightgbm_model() -> bool:
 
     logger.info("Training LightGBM model across %d estimators...", 500)
 
-    model = lgb.train(
+    selection_model = lgb.train(
         params,
         train_data,
         num_boost_round=500,
@@ -202,12 +255,12 @@ def train_lightgbm_model() -> bool:
         ],
     )
 
-    train_scores = model.best_score.get("train", {})
-    validation_scores = model.best_score.get("validation", {})
+    train_scores = selection_model.best_score.get("train", {})
+    validation_scores = selection_model.best_score.get("validation", {})
     logger.info(
         "LightGBM training summary: best_iteration=%d train_multi_logloss=%s "
         "validation_multi_logloss=%s",
-        model.best_iteration,
+        selection_model.best_iteration,
         f"{train_scores['multi_logloss']:.5f}"
         if "multi_logloss" in train_scores
         else "unavailable",
@@ -239,24 +292,123 @@ def train_lightgbm_model() -> bool:
         ),
     )
 
-    if validation_logloss is None or validation_logloss >= baseline_validation_logloss:
+    if (
+        selection_model.best_iteration < 1
+        or validation_logloss is None
+        or validation_logloss >= baseline_validation_logloss
+    ):
         logger.warning(
             "LightGBM did not beat the class-prior validation baseline; "
             "not replacing the existing checkpoint."
         )
         return False
 
-    model.save_model(LGB_MODEL_PATH)
-    logger.info("Saved trained LightGBM model artifact to %s", LGB_MODEL_PATH)
+    selected_iterations = int(selection_model.best_iteration)
+
+    fold_metadata_parts: list[pd.DataFrame] = []
+    fold_probability_parts: list[np.ndarray] = []
+    for fold_index, (fold_start, fold_end) in enumerate(plan.oos_folds, start=1):
+        fold_parts = _collect_partitions(
+            direction,
+            plan,
+            {
+                "fit": (None, fold_start, True, False),
+                "oos": (fold_start, fold_end, False, True),
+            },
+        )
+        fold_train = fold_parts["fit"]
+        fold_oos = fold_parts["oos"]
+        fold_model = lgb.train(
+            params,
+            lgb.Dataset(
+                fold_train.features,
+                label=fold_train.targets,
+                categorical_feature=categorical_features,
+            ),
+            num_boost_round=selected_iterations,
+        )
+        fold_metadata = fold_oos.metadata.copy()
+        fold_metadata["fold_id"] = f"fold_{fold_index}"
+        fold_metadata["model_training_cutoff"] = fold_start.date().isoformat()
+        fold_metadata_parts.append(fold_metadata)
+        fold_probability_parts.append(
+            np.asarray(fold_model.predict(fold_oos.features), dtype=np.float64)
+        )
+        logger.info(
+            "%s LightGBM walk-forward fold %d/%d: fit rows=%d OOS rows=%d "
+            "OOS dates=%s..%s",
+            direction,
+            fold_index,
+            len(plan.oos_folds),
+            len(fold_train.features),
+            len(fold_oos.features),
+            fold_start.date(),
+            (fold_end - pd.Timedelta(days=1)).date(),
+        )
+
+    final_parts = _collect_partitions(
+        direction,
+        plan,
+        {
+            "final_fit": (None, plan.final_holdout_start, True, False),
+            "final_holdout": (plan.final_holdout_start, None, False, True),
+        },
+    )
+    final_train = final_parts["final_fit"]
+    final_holdout = final_parts["final_holdout"]
+    model = lgb.train(
+        params,
+        lgb.Dataset(
+            final_train.features,
+            label=final_train.targets,
+            categorical_feature=categorical_features,
+        ),
+        num_boost_round=selected_iterations,
+    )
+
+    holdout_metadata = final_holdout.metadata.copy()
+    holdout_metadata["fold_id"] = "final_holdout"
+    holdout_metadata["model_training_cutoff"] = (
+        plan.final_holdout_start.date().isoformat()
+    )
+    holdout_probabilities = np.asarray(
+        model.predict(final_holdout.features), dtype=np.float64
+    )
+    temporary_model_path: str | None = None
+    try:
+        with NamedTemporaryFile(
+            suffix=model_path.suffix,
+            dir=model_path.parent,
+            delete=False,
+        ) as temporary_model:
+            temporary_model_path = temporary_model.name
+        model.save_model(temporary_model_path)
+        os.replace(temporary_model_path, model_path)
+    finally:
+        if temporary_model_path and os.path.exists(temporary_model_path):
+            os.unlink(temporary_model_path)
+    logger.info(
+        "Saved refit %s LightGBM artifact from %d rows through %s to %s",
+        direction,
+        len(final_train.features),
+        plan.final_holdout_start.date(),
+        model_path,
+    )
 
     # Save schema mapping details
     schema = {
+        "trading_schema_version": SCHEMA_VERSION,
+        "direction": direction,
+        "checkpoint_sha256": sha256_file(model_path),
         "feature_schema_version": FEATURE_SCHEMA_VERSION,
         "label_schema_version": LABEL_SCHEMA_VERSION,
         "feature_columns": list(LGB_MODEL_INPUT_COLUMNS),
         "objective": "multiclass",
         "class_mapping": {0: -1, 1: 0, 2: 1},
-        "best_iteration": int(model.best_iteration),
+        "selection_best_iteration": selected_iterations,
+        "final_fit_rows": int(len(final_train.features)),
+        "final_fit_cutoff": plan.final_holdout_start.date().isoformat(),
+        "walk_forward_folds": len(plan.oos_folds),
         "train_multi_logloss": (
             float(train_scores["multi_logloss"])
             if "multi_logloss" in train_scores
@@ -269,9 +421,22 @@ def train_lightgbm_model() -> bool:
         ),
         "class_prior_validation_multi_logloss": baseline_validation_logloss,
     }
-    with open(LGB_MODEL_SCHEMA_PATH, "w", encoding="utf-8") as schema_file:
-        json.dump(schema, schema_file, indent=4)
+    atomic_write_json(schema_path, schema)
     logger.info(
-        "Saved LightGBM model schema configuration to %s", LGB_MODEL_SCHEMA_PATH
+        "Saved %s LightGBM model schema configuration to %s", direction, schema_path
+    )
+    write_oos_predictions(
+        direction,
+        "lgb",
+        pd.concat(fold_metadata_parts, ignore_index=True),
+        np.concatenate(fold_probability_parts, axis=0),
+        partition="oos",
+    )
+    write_oos_predictions(
+        direction,
+        "lgb",
+        holdout_metadata,
+        holdout_probabilities,
+        partition="final",
     )
     return True

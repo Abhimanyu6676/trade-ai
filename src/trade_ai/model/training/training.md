@@ -1,121 +1,205 @@
 # Model Training Lifecycle
 
-`train_master.py` accepts `gru`, `lgb`, or `both` (default). With `both`, it
-trains LightGBM first and GRU second.
+The training package has two directional specialist pipelines and one shared
+PPO meta-agent. Long and short use the same multi-timeframe feature definitions
+but separate label semantics and checkpoint directories. The meta-agent sees
+frozen, chronological out-of-sample predictions from all four specialists.
+Training only creates forecast and policy artifacts; it does not send broker
+orders.
 
-Both trainers use the ticker keys in `model/stock_metadata.py` as their
-training universe. Adding a ticker there includes it in both models' next
-training run; GRU still excludes the metadata columns from its inputs. Newly
-added sector categories require LightGBM retraining to learn those categories.
+## Configuration and labels
 
-## Steps
+`trade_ai/config/trading_config.py` is the source of truth for the strategy
+schema, baseline barriers, supported bracket multipliers, holding period,
+market times, model directories, and RL simulation costs. The current rules
+are:
 
-1. **Select models.** Resolve the requested selection to the model names to train.
-2. **Back up checkpoints.** Copy existing selected model files to timestamped
-   backups, including LightGBM schema manifests. Missing files are skipped.
-3. **Unload selected models.** Clear their in-memory manager references before
-   training.
-4. **Prepare and train LightGBM** when selected. For each ticker, load cached
-   OHLCV history from `training/tickData/` or fetch and cache it there. Normalize
-   candle columns, parse and sort timestamps oldest-to-newest, and keep only
-   the last row per timestamp before computing features and Triple Barrier labels.
-   Label generation precomputes timestamp components and reports progress every
-   50,000 eligible entries. Drop rows with missing targets. Split each ticker
-   chronologically into 80% training and 20%
-   validation rows, then purge up to 60 feature rows before each validation
-   boundary so training labels cannot inspect validation-period candles. Combine
-   the per-ticker splits and train up to 500 rounds. Training and validation
-   row counts and class distributions are logged; LightGBM reports both losses
-   every 50 rounds and uses validation loss for early stopping after 50 rounds
-   without improvement. Labels compare future candle closes against a take-profit
-   barrier 1% above the entry close and a stop-loss barrier 0.5% below it. The
-   barrier percentages no longer depend on ATR. Checkpoints made with an earlier
-   label schema are rejected and require retraining.
-   The selected checkpoint is saved only if its validation logloss beats the
-   training class-prior baseline. Its sidecar records label schema version,
-   selected iteration, and validation metrics. For cache misses in
-   either trainer, the shared `training/util.py` helpers use OpenAlgo to request
-   distinct inclusive 30-calendar-day chunks, with up to three attempts per
-   chunk. A chunk that fails all attempts aborts that ticker's download rather
-   than using partial history. Empty chunks before the first non-empty history
-   response are treated as pre-listing periods and skipped. After history
-   starts, an empty chunk is retried and then aborts the ticker to prevent a
-   gap; if every chunk is empty, the ticker is skipped and no CSV is cached.
-   Inclusive chunks advance from the previous end date to the next calendar day,
-   so adjacent ranges do not omit a date. The shared helper logs cache hits,
-   requested date ranges, retries, failures, empty results, and successful cache
-   writes. Save the checkpoint only when the validation baseline check passes;
-   otherwise keep the existing artifact unchanged.
-5. **Prepare and train GRU** when selected. For each ticker, split labeled rows
-   chronologically into 80% training and 20% validation, then purge up to 60
-   candle rows before the validation boundary so training labels cannot inspect
-   validation-period candles. Rows with missing targets may provide sequence
-   context, but each sequence must end on a labeled row and stay within one
-   session. Each epoch logs per-ticker training and validation loss/accuracy,
-   sequence counts, and the initial split's class counts, plus aggregate epoch
-   metrics. Each ticker's features, labels, splits, and windows are prepared once
-   and retained in memory for reuse across epochs; validation runs one ticker at
-   a time. GRU accepts an epoch limit from 5 through 20; it always trains at
-   least 5 epochs, then stops if validation loss has not improved for 3
-   consecutive epochs, or at the 20-epoch limit. It saves the checkpoint with
-   the best validation loss. The checkpoint includes the feature schema version
-   and ordered input-column names. Each trainer selects its model-specific
-   schema; GRU excludes static metadata, while LightGBM includes fixed integer
-   codes for `Cap` and `Sector` and declares them as categorical. When adding a
-   sector, append a stable code, map unknown tickers to `Other`, and retrain
-   LightGBM. Both models exclude raw OHLCV from model inputs. See
-   `../features.md` for counts and full input lists. GRU training raises an
-   error if no valid train and validation sequences are available.
-6. **Reload selected models after success.** The `finally` block reloads the
-   selected models only if every selected trainer returned successfully. If a
-   trainer raises an error, reload is skipped and the selected models remain
-   unloaded in the current process until they are explicitly reloaded or the app
-   restarts. A schema mismatch during a successful run still leaves that model
-   unloaded and requires retraining.
+- Long take profit is +1.0% and stop loss is -0.5% from entry.
+- Short take profit is -1.0% and stop loss is +0.5% from entry.
+- Labels use `1` for take profit first, `-1` for stop loss first, and `0` for
+  timeout for both directions. The classes describe the outcome of the
+  direction-specific trade.
+- Entries are allowed from 10:00 through 14:30. Future close checks stop at the
+  earlier of 60 bars, the calendar-date boundary, or the 15:15 market close.
+  The candle timestamp is at candle open, so the 15:14 candle is eligible and
+  15:15 is excluded.
 
-The default GRU run allows up to 20 epochs, with a minimum of 5, uses 30
-candles per sequence, and batches of 256. Early stopping uses a patience of 3
-epochs after the minimum training period.
-Checkpoint files are under `src/trade_ai/model/.run_cache/`:
-`lgb_trading_model_v{FEATURE_SCHEMA_VERSION}.txt` with its `.schema.json`
-manifest, and `gru_trading_model_v{FEATURE_SCHEMA_VERSION}.pth` with schema
-metadata in the checkpoint. See `../features.md` for the active feature schema
-version and model input inventories.
+The base labelers always use the baseline barriers above. PPO selects a bracket
+multiplier of 0.75, 1.0, or 1.25 at entry and scales both distances by that same
+value, preserving the 2:1 target-to-stop ratio. Raw OHLCV stays in the
+calculation frame and is excluded from all four base-model inputs.
 
-Run training in the foreground from the repository root with:
+Increment `SCHEMA_VERSION` whenever features, labels, direction semantics, RL
+observation fields, or action meanings change. Loaders reject artifacts with an
+older version and request retraining. Feature and label schema versions are
+also kept in each manifest for specific compatibility errors. The PPO action
+and observation contract is schema version 3. Because the shared trading schema
+is recorded in the base-model manifests too, existing version-2 base models and
+PPO artifacts must all be retrained before prediction resumes.
+
+## Training selectors
+
+Run `train_master.py` with two optional positional arguments:
+
+1. Mindset: `long`, `short`, or `both` (default `both`).
+2. Component: `gru`, `lgb`, `rl`, or `all` (default `all`).
+
+There are no interactive prompts. `rl` always trains the one unified policy
+against all four current specialists, even when the first selector is only one
+side. A long-only or short-only `all` run therefore requires compatible OOS
+streams for the opposite side before the common policy can train.
+
+Examples:
 
 ```sh
-uv run python -m trade_ai.model.training.train_master [gru|lgb|both]
+# Train every specialist, then the shared policy
+uv run python -m trade_ai.model.training.train_master both all
+
+# Train only short-side GRU
+uv run python -m trade_ai.model.training.train_master short gru
+
+# Train only the common RL policy from existing compatible OOS streams
+uv run python -m trade_ai.model.training.train_master both rl
 ```
 
-## Run training in the background
+## Base specialist lifecycle
 
-To keep training running after closing the terminal, launch it with `nohup`
-from the repository root. The command creates a timestamped log under `logs/`
-and saves the process ID to `logs/train.pid`:
+For each selected direction, `train_master.py` backs up the prior checkpoint
+and sidecar, unloads selected models, and then runs LightGBM followed by GRU.
+Both trainers use the ticker universe in `model/stock_metadata.py`, normalize
+cached or downloaded OHLCV through `training/util.py`, build direction-specific
+labels, and attempt every ticker configured in `STOCK_METADATA`. Tickers with
+missing or insufficient data are skipped and logged. One pooled calendar gives
+every ticker the same whole-session boundaries: 55% initial fitting, the next
+15% model selection, the next 20% in four expanding OOS forecast folds, and the
+newest 10% as a final holdout. Up to 60 candle rows are purged before fit
+boundaries so label look-ahead does not cross into the next period.
+
+LightGBM uses its native categorical `Cap` and `Sector` fields, selects the
+boosting-round count on the middle validation period, and proceeds only if its
+validation logloss beats the training class-prior baseline. GRU uses
+same-calendar-date 30-candle windows, keeps unlabeled rows as context, and
+selects its epoch by validation loss. With those settings fixed, each fold gets
+a fresh model fitted on all eligible prior dates (with the boundary purge) and
+predicts only its next chronological block. After fold generation, each family
+refits on all eligible history before the newest 10%, using the selected round
+or epoch count, and saves that model for inference. A LightGBM run that fails
+its validation baseline gate does not replace its existing checkpoint or write
+new prediction streams.
+
+The fold predictions include ticker, timestamp, close, ATR, volatility ratio,
+fold ID, and the exclusive model-training cutoff. The four OOS manifests record
+schemas and final-checkpoint SHA-256 digests; PPO rejects missing, stale, or
+misaligned streams. Final-holdout predictions are saved separately. Splits are
+not randomized across rows or tickers: missing tickers are skipped, while all
+eligible tickers use the same global session dates. GRU shuffles minibatches
+within its fit partition, LightGBM uses its configured bagging/feature sampling,
+and PPO samples episodes within its fit partition; these do not alter which
+dates belong to fit, selection, OOS, or holdout.
+
+## Unified PPO meta-agent
+
+The Gymnasium environment observes all four three-class probability vectors,
+long and short model agreement, scaled relative 1m ATR and volatility ratio,
+portfolio position, unrealized return, bars held, and the active bracket
+multiplier. ATR is volatility context for the policy; it does not set the
+profit or stop distance. Its 19 discrete actions are flat or long/short at
+0.5x/1x/1.5x size, crossed with bracket widths 0.75x/1.0x/1.25x. The flat
+action is shared. At entry, the selected width scales both baseline barriers:
+long TP +1.0% / SL -0.5%, short TP -1.0% / SL +0.5%. The selected multiplier
+stays fixed while the position remains open. The 20-value observation and
+19-action contract are stored in the policy sidecar and validated when loading.
+
+The PPO inputs have bounded or relative scales: probabilities and agreement are
+0–1, ATR is relative to close then clipped/scaled, the volatility ratio is
+clipped/scaled, position is divided by the maximum size, unrealized portfolio
+return is clipped/scaled, holding bars are divided by the 60-bar limit, and the
+active bracket multiplier is mapped to [-1, 1] while in a position. There are
+no raw price, volume, timestamp, or ticker-id observations.
+
+The historical simulator uses close-to-close returns and the baseline
+direction-specific barriers scaled by the selected entry multiplier, a 60-bar
+cap, an estimated 5 bp one-way transaction cost, an entry penalty when the
+side's models disagree, and an incremental drawdown penalty. It ends episodes
+at the ticker's calendar-session boundary.
+It does not model intrabar ordering, spreads, market impact, partial fills, or
+broker execution. The 5 bp cost and reward weights are modeling assumptions in
+the centralized config, not measured OpenAlgo costs.
+
+PPO training and policy selection use only aligned predictions from the four
+walk-forward OOS folds. The earlier 80% of their session dates is PPO fit data;
+the later 20% selects the deterministic candidate. PPO retains a candidate only
+when its mean reward on this selection period beats the flat zero-reward
+baseline. After that decision, the trainer evaluates every available
+ticker/session episode from the newest 10% final holdout and records the result
+in the policy schema. The holdout score does not decide whether to save the
+candidate. It is a post-selection report for that run, not evidence of live
+profitability; repeated runs and manual tuning after viewing it can contaminate
+the holdout.
+
+The training modules run these chronological splits, purges, validation gates,
+OOS generation, provenance checks, and final reporting automatically. This
+reduces leakage risk but cannot identify look-ahead already present in upstream
+data or feature calculations, prevent survivorship bias, or make repeated human
+selection on the final holdout safe.
+
+## Artifacts and loading
+
+Artifacts are stored under `src/trade_ai/model/.run_cache/`:
+
+- `long/lgb_model.txt` plus its schema sidecar.
+- `long/gru_model.pth`.
+- `short/lgb_model.txt` plus its schema sidecar.
+- `short/gru_model.pth`.
+- `rl/meta_agent.zip` plus `meta_agent.schema.json`.
+- `rl/oos/` contains per-specialist `*_oos.csv` walk-forward predictions and
+  `*_final.csv` final-holdout predictions, each with a schema sidecar.
+
+The model manager validates trading, feature, label, direction, and ordered
+input schemas for every base model. It loads PPO only when the observation and
+action contracts match and the four checkpoint hashes equal the hashes recorded
+in the policy manifest. After a base model changes, the previous policy is
+backed up and will not be used until retrained against those exact base files.
+
+## Foreground run
+
+From the repository root, run all five model-training stages in the foreground:
+
+```sh
+uv sync
+uv run python -m trade_ai.model.training.train_master both all
+```
+
+Use `long|short|both` and `gru|lgb|rl|all` in place of the selectors as needed.
+Stop a foreground run with `Ctrl+C`.
+
+## Detached background run with a log file
+
+To keep the full run alive after closing the terminal, start it with `nohup`.
+The command creates a timestamped log under `logs/` and saves the PID to
+`logs/train.pid`:
 
 ```sh
 mkdir -p logs
-LOG_FILE="logs/train_both_$(date +%Y%m%d_%H%M%S).log"
-nohup uv run python -m trade_ai.model.training.train_master both >"$LOG_FILE" 2>&1 </dev/null &
+LOG_FILE="logs/train_both_all_$(date +%Y%m%d_%H%M%S).log"
+nohup uv run python -m trade_ai.model.training.train_master both all >"$LOG_FILE" 2>&1 </dev/null &
 TRAIN_PID=$!
 printf '%s\n' "$TRAIN_PID" > logs/train.pid
 printf 'Training PID: %s\nLog file: %s\n' "$TRAIN_PID" "$LOG_FILE"
 ```
 
-Follow the latest background training log (or use the specific path printed at
-launch):
+Follow that run's log:
 
 ```sh
-tail -f "$(ls -t logs/train_both_*.log | head -n 1)"
+tail -f "$(ls -t logs/train_both_all_*.log | head -n 1)"
 ```
 
-Check whether the process is still running with:
+Check whether it is still running:
 
 ```sh
 ps -p "$(cat logs/train.pid)" -o pid,stat,etime,cmd
 ```
 
-If `ps` prints no process, the run has exited; inspect the log's final lines
-for its outcome. Successful completion logs `Training completed successfully`
-for the selected models, while errors are logged with the failure details.
+If `ps` prints no process, inspect the log's final lines. A LightGBM baseline
+rejection or an RL selection rejection is reported as a completed run with
+skips; exceptions are reported as a failed run.

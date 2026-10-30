@@ -1,0 +1,41 @@
+{
+  "format": "codex-account-switcher-profiles",
+  "version": 1,
+  "exportedAt": "2026-10-30T06:22:18.078Z",
+  "activeProfileId": "2555c912-b10b-4114-adce-d36d95a414f7",
+  "lastProfileId": "83e12c79-7894-4969-8e61-5cae19040cc4",
+  "profiles": [
+    {
+      "profile": {
+        "id": "2555c912-b10b-4114-adce-d36d95a414f7",
+        "name": "iamlive24.001",
+        "email": "iamlive24.001@gmail.com",
+        "planType": "free",
+        "accountId": "89a2ce07-6814-4073-af84-b9a26df7aa35",
+        "defaultOrganizationId": "org-atocDcIXq5uBz3cvpnZQmui6",
+        "defaultOrganizationTitle": "Personal",
+        "chatgptUserId": "user-frUU8LgwpNREt38Yil2RIX35",
+        "userId": "user-frUU8LgwpNREt38Yil2RIX35",
+        "subject": "google-oauth2|110937314118941381760",
+        "createdAt": "2026-10-26T05:20:12.961Z",
+        "updatedAt": "2026-10-26T05:20:12.961Z"
+      }
+    },
+    {
+      "profile": {
+        "id": "83e12c79-7894-4969-8e61-5cae19040cc4",
+        "name": "iamlive24.002",
+        "email": "iamlive24.002@gmail.com",
+        "planType": "free",
+        "accountId": "c704fbec-7f86-4e39-9d27-5042be7bc952",
+        "defaultOrganizationId": "org-x8gpWtbcxdBRdNmCkTi1b93i",
+        "defaultOrganizationTitle": "Personal",
+        "chatgptUserId": "user-PtJbqm3aYX1Red3eZg2qRp46",
+        "userId": "user-PtJbqm3aYX1Red3eZg2qRp46",
+        "subject": "google-oauth2|118071833278243734682",
+        "createdAt": "2026-10-30T06:17:04.883Z",
+        "updatedAt": "2026-10-30T06:17:04.883Z"
+      }
+    }
+  ]
+}

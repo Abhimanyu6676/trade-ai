@@ -1,4 +1,4 @@
-read `training/gemini.md` first for context of next course of action.
+read `/home/ubuntu/trading/trade-ai/src/trade_ai/model/training/gemini.md` first for context of next course of action.
 
 and then below is the action prompt, read & execute
 

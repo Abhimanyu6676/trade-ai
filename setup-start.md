@@ -10,6 +10,7 @@ Update it when setup or startup steps change, or when a new setup/start check is
 
 - Python 3.14 or newer, as specified by `.python-version` and `pyproject.toml`.
 - `uv` for dependency and project environment management.
+- Gymnasium and Stable-Baselines3 for the PPO meta-agent; `uv sync` installs them.
 - The GNU OpenMP runtime (`libgomp1` on Debian/Ubuntu), required by LightGBM.
 - An OpenAlgo endpoint and API key for market-data access.
 - nodemon installed globally for development hot reloads ```npm i -g nodemon```
@@ -117,20 +118,36 @@ export PIP_CACHE_DIR="$(pwd)/.run_cache"
 uv run python src/trade_ai/app.py
 ```
 
-Train one model or both in the foreground. `both` is the default and runs
-LightGBM followed by GRU:
+Train selected directional models in the foreground. The first selector is the
+mindset (`long`, `short`, or `both`, default `both`); the second is the
+component (`gru`, `lgb`, `rl`, or `all`, default `all`). The full run trains all
+four base specialists and then the shared PPO meta-agent:
 
 ```sh
-uv run python -m trade_ai.model.training.train_master both
+uv run python -m trade_ai.model.training.train_master both all
 ```
 
-Pass `gru` or `lgb` instead of `both` to train only that model.
+Examples:
+
+```sh
+uv run python -m trade_ai.model.training.train_master long lgb
+uv run python -m trade_ai.model.training.train_master short gru
+uv run python -m trade_ai.model.training.train_master both rl
+```
+
+RL is one shared policy over all four base models and requires compatible
+out-of-sample predictions from each specialist. See
+`src/trade_ai/model/training/training.md` for its validation and detached-run
+logging details.
 
 Stop a foreground app or training process with `Ctrl+C`.
 
 ## First Start
 
-The app can start without trained checkpoints, but it cannot produce a model forecast until at least one model checkpoint exists. Run the master training command above to create both checkpoints. The ensemble blends them when both are available.
+The app can start without trained artifacts, but it cannot produce a decision
+until all four directional base checkpoints and a compatible RL policy exist.
+Run the master training command above to create those artifacts. Checkpoint
+schema or base-hash mismatches require retraining before prediction is enabled.
 
 ## Common Error Fixes
 
