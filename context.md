@@ -149,11 +149,15 @@ logger instead of creating module-specific loggers. Python's
   gaps. Failed downloads are not cached, and successful history caches are not
   automatically refreshed.
 - `training/train_master.py` accepts `long|short|both` (default `both`) and
-  `gru|lgb|rl|all` (default `all`). It backs up selected artifacts, unloads
-  selected models, runs selected specialists and/or the shared PPO trainer,
-  then reloads only schema-compatible artifacts. RL is common to all four base
-  models. See `model/training/training.md` for lifecycle and foreground/
-  background commands.
+  `gru|lgb|rl|all` (default `all`). Its CLI validates and records the selectors,
+  then launches the training worker in a detached process with a timestamped
+  log and metadata JSON under the repository-root `logs/` directory; the worker
+  PID is saved to `logs/train.pid`. Interactive foreground runs prompt for
+  omitted selectors or confirm supplied selectors. The worker backs up selected
+  artifacts, unloads selected models, runs selected specialists and/or the
+  shared PPO trainer, then reloads only schema-compatible artifacts. RL is
+  common to all four base models. See `model/training/training.md` for lifecycle
+  and launcher commands.
 - Model artifacts live in `src/trade_ai/model/.run_cache/long/`, `short/`, and
   `rl/`. The PPO sidecar includes the exact base checkpoint hashes, so changing
   any base model invalidates the current meta-agent until it is retrained.
@@ -215,7 +219,8 @@ logger instead of creating module-specific loggers. Python's
 - `src/trade_ai/model/training/labeling.py`: shared direction-aware barrier
   implementation; `training/rl/` joins base OOS predictions.
 - `src/trade_ai/model/training/train_lgb.py`, `train_gru.py`, `train_rl.py`,
-  and `train_master.py`: training implementations and orchestration.
+  and `train_master.py`: training implementations, detached CLI launcher, and
+  orchestration.
 - `src/trade_ai/model/training/trading_env.py`: PPO observation contract and
   historical simulator.
 - `src/trade_ai/model/models.py`: four base models, PPO loading, schema checks,

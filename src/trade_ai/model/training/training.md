@@ -44,18 +44,28 @@ Run `train_master.py` with two optional positional arguments:
 1. Mindset: `long`, `short`, or `both` (default `both`).
 2. Component: `gru`, `lgb`, `rl`, or `all` (default `all`).
 
-There are no interactive prompts. `rl` always trains the one unified policy
-against all four current specialists, even when the first selector is only one
-side. A long-only or short-only `all` run therefore requires compatible OOS
-streams for the opposite side before the common policy can train.
+The launcher validates both selectors before starting. In an interactive
+foreground shell, no arguments opens selectors for both values; supplied
+arguments are shown for yes/no confirmation. In a non-interactive shell or
+background launch, omitted arguments use the defaults and supplied arguments
+are validated without prompting. Every accepted run starts the actual training
+worker in a detached process, so the launcher returns immediately and the
+terminal can be closed. It records the supplied and resolved arguments in a
+timestamped JSON file and in that run's log under the repository-root `logs/`
+directory. The worker PID is saved to `logs/train.pid`.
+
+`rl` always trains the one unified policy against all four current specialists,
+even when the first selector is only one side. A long-only or short-only `all`
+run therefore requires compatible OOS streams for the opposite side before the
+common policy can train.
 
 Examples:
 
 ```sh
-# Train every specialist, then the shared policy
+# Launch every specialist, then the shared policy, in the background
 uv run python -m trade_ai.model.training.train_master both all
 
-# Train only short-side GRU
+# Launch only short-side GRU in the background
 uv run python -m trade_ai.model.training.train_master short gru
 
 # Train only the common RL policy from existing compatible OOS streams
@@ -161,34 +171,19 @@ action contracts match and the four checkpoint hashes equal the hashes recorded
 in the policy manifest. After a base model changes, the previous policy is
 backed up and will not be used until retrained against those exact base files.
 
-## Foreground run
+## Launching training
 
-From the repository root, run all five model-training stages in the foreground:
+From the repository root, start a run with:
 
 ```sh
-uv sync
 uv run python -m trade_ai.model.training.train_master both all
 ```
 
-Use `long|short|both` and `gru|lgb|rl|all` in place of the selectors as needed.
-Stop a foreground run with `Ctrl+C`.
+Replace `both all` with any valid mindset and component. The launcher prints the
+worker PID, log path, and metadata path. Training continues after the launcher
+returns or its terminal closes.
 
-## Detached background run with a log file
-
-To keep the full run alive after closing the terminal, start it with `nohup`.
-The command creates a timestamped log under `logs/` and saves the PID to
-`logs/train.pid`:
-
-```sh
-mkdir -p logs
-LOG_FILE="logs/train_both_all_$(date +%Y%m%d_%H%M%S).log"
-nohup uv run python -m trade_ai.model.training.train_master both all >"$LOG_FILE" 2>&1 </dev/null &
-TRAIN_PID=$!
-printf '%s\n' "$TRAIN_PID" > logs/train.pid
-printf 'Training PID: %s\nLog file: %s\n' "$TRAIN_PID" "$LOG_FILE"
-```
-
-Follow that run's log:
+Follow the latest full run's log:
 
 ```sh
 tail -f "$(ls -t logs/train_both_all_*.log | head -n 1)"

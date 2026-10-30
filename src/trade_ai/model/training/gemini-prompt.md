@@ -58,15 +58,13 @@ Please implement the following exact requirements across the codebase:
 - **Environment State Space:** Observes frozen base model probabilities (`[P_lgb, P_gru]`), agreement metrics, market volatility (ATR), and portfolio state.
 - **Environment Reward Function:** Rewards clean wins (matching the 1% / 0.5% targets) and penalizes drawdowns, high turnover, or trading during model disagreement.
 
-### 4. Interactive Training Master Script (`src/training_master.py`)
-- Build a command-line interactive wizard (supporting both CLI arguments and interactive prompts via `input()`) that asks:
-  1. **Which mindset to train?** Options: `[long, short, or both]`
-  2. **Which model component to train?** Options: `[gru, lgb, rl, or all]`
-- Based on the user's selection, the script should dynamically route execution to the correct training scripts inside `src/training/long/` or `src/training/short/`, injecting the correct `SCHEMA_VERSION` checks.
-
-- train_master.py should take two optional args first for which set to train long, short or both and is both by default & second is which model to train gru, lgb or RL[common for both long/short] and is all by default. no interactive shell selector options
-
-- also add the training example command in training.md for foreground and background, attached or detached shell will logging in file for detached. just as we are doing it now
+### 4. Training Master Launcher (`src/trade_ai/model/training/train_master.py`)
+- Accept two optional positional args: mindset (`long`, `short`, or `both`, default `both`) and component (`gru`, `lgb`, `rl`, or `all`, default `all`).
+- Validate supplied args before any training starts. In an interactive foreground shell, show selectors when no args are supplied and ask for yes/no confirmation when args are supplied. In a non-interactive or background shell, use defaults for omitted args and do not prompt.
+- Always launch the actual training worker as a detached process. Save user-supplied and resolved args in a timestamped JSON metadata file and the training log under the repository-root `logs/` directory, and save the worker PID in `logs/train.pid`.
+- Print the worker PID and log/metadata paths so the user can follow the run after the launcher returns.
+- Route execution to the correct long/short specialist trainers and the unified PPO trainer, preserving the existing schema checks.
+- Document the foreground launcher invocation and the detached worker logging behavior in `training.md`.
 
 ### 5. Validation & Safety Checks
 - Ensure all scripts validate dataset schema versions before loading historical weights. If an artifact was saved under an older schema version, raise an explicit error prompting re-training.
