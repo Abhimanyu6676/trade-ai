@@ -18,7 +18,7 @@ TICK_DATA_DIR = os.path.join(os.path.dirname(__file__), "tickData")
 def download_stock_history_in_chunks(
     ticker: str,
     exchange: TYPE_OPENALGO_EXCHANGE = "NSE",
-    start_date: date = date(2021, 11, 1),
+    start_date: date = date(2020, 1, 1),
     end_date: date = date(2026, 7, 31),
     chunk_days: int = 30,
     retries: int = 3,
