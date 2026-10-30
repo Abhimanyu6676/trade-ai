@@ -15,7 +15,7 @@
 encodes metadata for LightGBM and removes metadata columns for GRU. Training,
 inference, and checkpoint validation use the corresponding model-specific input
 tuple. Checkpoint filenames include the schema version; checkpoints also store
-the version and ordered input names. The current feature schema version is 6.
+the version and ordered input names. The current feature schema version is 7.
 
 ## Model input inventory
 
@@ -84,9 +84,11 @@ of the given timeframe (so 10 bars on 5m data spans 50 minutes).
 
 `Cap` codes are large=0, mid=1, small=2. `Sector` codes are banking=0,
 IT=1, auto=2, energy=3, consumer=4, metals=5, other=6. Keep existing codes
-fixed and append codes when adding categories. Unknown tickers use `Other`.
-When a new sector is added, update the enum, metadata mapping, and category code,
-then retrain LightGBM so it can learn that category. Feature width remains fixed.
+fixed and append codes when adding categories. The current additional sector
+codes are infrastructure=7, financial_services=8, pharmaceuticals=9, telecom=10,
+and industrials=11. Unknown tickers use `Other`. When a new sector is added,
+update the enum, metadata mapping, and category code, then retrain LightGBM so it
+can learn that category. Feature width remains fixed.
 
 ## Scaling audit
 

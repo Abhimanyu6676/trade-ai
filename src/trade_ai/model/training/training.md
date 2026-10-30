@@ -3,6 +3,11 @@
 `train_master.py` accepts `gru`, `lgb`, or `both` (default). With `both`, it
 trains LightGBM first and GRU second.
 
+Both trainers use the ticker keys in `model/stock_metadata.py` as their
+training universe. Adding a ticker there includes it in both models' next
+training run; GRU still excludes the metadata columns from its inputs. Newly
+added sector categories require LightGBM retraining to learn those categories.
+
 ## Steps
 
 1. **Select models.** Resolve the requested selection to the model names to train.
@@ -75,3 +80,35 @@ Run training in the foreground from the repository root with:
 ```sh
 uv run python -m trade_ai.model.training.train_master [gru|lgb|both]
 ```
+
+## Run training in the background
+
+To keep training running after closing the terminal, launch it with `nohup`
+from the repository root. The command creates a timestamped log under `logs/`
+and saves the process ID to `logs/train.pid`:
+
+```sh
+mkdir -p logs
+LOG_FILE="logs/train_both_$(date +%Y%m%d_%H%M%S).log"
+nohup uv run python -m trade_ai.model.training.train_master both >"$LOG_FILE" 2>&1 </dev/null &
+TRAIN_PID=$!
+printf '%s\n' "$TRAIN_PID" > logs/train.pid
+printf 'Training PID: %s\nLog file: %s\n' "$TRAIN_PID" "$LOG_FILE"
+```
+
+Follow the latest background training log (or use the specific path printed at
+launch):
+
+```sh
+tail -f "$(ls -t logs/train_both_*.log | head -n 1)"
+```
+
+Check whether the process is still running with:
+
+```sh
+ps -p "$(cat logs/train.pid)" -o pid,stat,etime,cmd
+```
+
+If `ps` prints no process, the run has exited; inspect the log's final lines
+for its outcome. Successful completion logs `Training completed successfully`
+for the selected models, while errors are logged with the failure details.

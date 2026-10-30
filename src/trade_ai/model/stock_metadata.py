@@ -24,6 +24,11 @@ class Sector(str, Enum):
     CONSUMER = "consumer"
     METALS = "metals"
     OTHER = "other"
+    INFRASTRUCTURE = "infrastructure"
+    FINANCIAL_SERVICES = "financial_services"
+    PHARMACEUTICALS = "pharmaceuticals"
+    TELECOM = "telecom"
+    INDUSTRIALS = "industrials"
 
 
 class StockMetadata(TypedDict):
@@ -39,8 +44,26 @@ STOCK_METADATA: dict[str, StockMetadata] = {
     "SBIN": {"cap": MarketCap.LARGE, "sector": Sector.BANKING},
     "HDFCBANK": {"cap": MarketCap.LARGE, "sector": Sector.BANKING},
     "TMPV": {"cap": MarketCap.LARGE, "sector": Sector.AUTO},
+    "ADANIPORTS": {"cap": MarketCap.LARGE, "sector": Sector.INFRASTRUCTURE},
+    "ADANIPOWER": {"cap": MarketCap.LARGE, "sector": Sector.ENERGY},
+    "JIOFIN": {"cap": MarketCap.LARGE, "sector": Sector.FINANCIAL_SERVICES},
+    # Jio Platforms listed 2026-10-28, after the AMFI Jan-Jun 2026 window;
+    # classify large from its listed market cap. OpenAlgo/NSE symbol is JPL.
+    "JPL": {"cap": MarketCap.LARGE, "sector": Sector.TELECOM},
+    "AXISBANK": {"cap": MarketCap.LARGE, "sector": Sector.BANKING},
+    "SUNPHARMA": {"cap": MarketCap.LARGE, "sector": Sector.PHARMACEUTICALS},
+    "TATASTEEL": {"cap": MarketCap.LARGE, "sector": Sector.METALS},
+    "ONGC": {"cap": MarketCap.LARGE, "sector": Sector.ENERGY},
+    "IOC": {"cap": MarketCap.LARGE, "sector": Sector.ENERGY},
+    "GAIL": {"cap": MarketCap.LARGE, "sector": Sector.ENERGY},
+    # "BHAIL" did not resolve in OpenAlgo; BHEL is the verified NSE symbol.
+    "BHEL": {"cap": MarketCap.LARGE, "sector": Sector.INDUSTRIALS},
+    "POWERGRID": {"cap": MarketCap.LARGE, "sector": Sector.ENERGY},
+    "ITC": {"cap": MarketCap.LARGE, "sector": Sector.CONSUMER},
     # "HINDZINC": {"cap": MarketCap.LARGE, "sector": Sector.METALS},
     # Mid Caps
+    "YESBANK": {"cap": MarketCap.MID, "sector": Sector.BANKING},
+    "AUROPHARMA": {"cap": MarketCap.MID, "sector": Sector.PHARMACEUTICALS},
     "FEDERALBNK": {"cap": MarketCap.MID, "sector": Sector.BANKING},
     "COFORGE": {"cap": MarketCap.MID, "sector": Sector.IT},
     "VOLTAS": {"cap": MarketCap.MID, "sector": Sector.CONSUMER},
@@ -70,6 +93,11 @@ SECTOR_CATEGORY_CODES: dict[Sector, int] = {
     Sector.CONSUMER: 4,
     Sector.METALS: 5,
     Sector.OTHER: 6,
+    Sector.INFRASTRUCTURE: 7,
+    Sector.FINANCIAL_SERVICES: 8,
+    Sector.PHARMACEUTICALS: 9,
+    Sector.TELECOM: 10,
+    Sector.INDUSTRIALS: 11,
 }
 METADATA_FEATURE_COLUMNS = ("Cap", "Sector")
 
