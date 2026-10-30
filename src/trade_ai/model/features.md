@@ -86,9 +86,9 @@ of the given timeframe (so 10 bars on 5m data spans 50 minutes).
 IT=1, auto=2, energy=3, consumer=4, metals=5, other=6. Keep existing codes
 fixed and append codes when adding categories. The current additional sector
 codes are infrastructure=7, financial_services=8, pharmaceuticals=9, telecom=10,
-and industrials=11. Unknown tickers use `Other`. When a new sector is added,
-update the enum, metadata mapping, and category code, then retrain LightGBM so it
-can learn that category. Feature width remains fixed.
+industrials=11, and chemicals=12. Unknown tickers use `Other`. When a new
+sector is added, update the enum, metadata mapping, and category code, then
+retrain LightGBM so it can learn that category. Feature width remains fixed.
 
 ## Scaling audit
 

@@ -1,8 +1,5 @@
-import asyncio
 import json
 import os
-from datetime import date, timedelta
-from time import sleep
 
 import lightgbm as lgb
 import numpy as np
@@ -11,8 +8,6 @@ import pandas as pd
 from trade_ai.logger import logger
 from trade_ai.model.models import LGB_MODEL_PATH, LGB_MODEL_SCHEMA_PATH
 from trade_ai.model.stock_metadata import METADATA_FEATURE_COLUMNS, STOCK_METADATA
-from trade_ai.openalgo.openalgo_client import TYPE_OPENALGO_EXCHANGE, openalgo
-from trade_ai.util import merge_ohlcv_history
 
 from ..features import (
     FEATURE_SCHEMA_VERSION,
@@ -24,115 +19,11 @@ from .labels import (
     MAX_HOLDING_PERIOD,
     apply_triple_barrier,
 )
+from .util import load_or_fetch_stock_data
 
 # Configure training paths
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-TICK_DATA_DIR = os.path.join(os.path.dirname(__file__), "tickData")
 CACHE_DIR = os.path.join(BASE_DIR, ".run_cache")
-
-
-def download_stock_history_in_chunks(
-    ticker: str,
-    exchange: TYPE_OPENALGO_EXCHANGE = "NSE",
-    start_date: date = date(2021, 11, 1),
-    end_date: date = date(2026, 7, 31),
-    chunk_days: int = 30,
-    retries: int = 3,
-) -> pd.DataFrame | None:
-    """Download historical 1-minute candles in inclusive date chunks."""
-    if chunk_days < 1:
-        raise ValueError("chunk_days must be at least 1")
-    if retries < 1:
-        raise ValueError("retries must be at least 1")
-    current_start = start_date
-    all_chunks: list[pd.DataFrame] = []
-
-    logger.info(
-        "[%s] Downloading historical data from %s to %s via OpenAlgo...",
-        ticker,
-        start_date.isoformat(),
-        end_date.isoformat(),
-    )
-
-    while current_start <= end_date:
-        current_end = min(current_start + timedelta(days=chunk_days - 1), end_date)
-
-        success = False
-        for attempt in range(retries):
-            try:
-                df_chunk = asyncio.run(
-                    openalgo.get_history(
-                        symbol=ticker,
-                        exchange=exchange,
-                        interval="1m",
-                        start_date=current_start,
-                        end_date=current_end,
-                    )
-                )
-                if not isinstance(df_chunk, pd.DataFrame):
-                    error_message = (
-                        df_chunk.get("message", "non-DataFrame response")
-                        if isinstance(df_chunk, dict)
-                        else f"unexpected response type {type(df_chunk).__name__}"
-                    )
-                    raise RuntimeError(
-                        f"OpenAlgo history request failed: {error_message}"
-                    )
-                if not df_chunk.empty:
-                    all_chunks.append(df_chunk)
-                success = True
-                break
-            except Exception as e:
-                logger.warning(
-                    "[%s] Retry %d failed for range %s to %s: %s",
-                    ticker,
-                    attempt + 1,
-                    current_start,
-                    current_end,
-                    e,
-                )
-                if attempt + 1 < retries:
-                    sleep(2)
-
-        if not success:
-            logger.error(
-                "[%s] Failed chunk %s to %s after %d attempts; aborting download.",
-                ticker,
-                current_start,
-                current_end,
-                retries,
-            )
-            return None
-
-        current_start = current_end + timedelta(days=1)
-
-    if not all_chunks:
-        return None
-
-    return merge_ohlcv_history(pd.concat(all_chunks))
-
-
-def load_or_fetch_stock_data(ticker: str) -> pd.DataFrame | None:
-    """Loads stock CSV from disk if available.
-
-    If missing (e.g. new stock added to metadata), downloads via OpenAlgo and caches
-    it.
-    """
-    os.makedirs(TICK_DATA_DIR, exist_ok=True)
-    stock_csv = os.path.join(TICK_DATA_DIR, f"{ticker}_history.csv")
-
-    if os.path.exists(stock_csv):
-        logger.info("[%s] Loading local dataset from disk: %s", ticker, stock_csv)
-        return merge_ohlcv_history(pd.read_csv(stock_csv))
-
-    logger.info("[%s] Local cache missing. Fetching new data...", ticker)
-    df = download_stock_history_in_chunks(ticker)
-    if df is not None and not df.empty:
-        df.to_csv(stock_csv, index=False)
-        logger.info("[%s] Saved newly downloaded history to %s", ticker, stock_csv)
-        return df
-
-    return None
 
 
 def prepare_training_data() -> tuple[

@@ -29,6 +29,7 @@ class Sector(str, Enum):
     PHARMACEUTICALS = "pharmaceuticals"
     TELECOM = "telecom"
     INDUSTRIALS = "industrials"
+    CHEMICALS = "chemicals"
 
 
 class StockMetadata(TypedDict):
@@ -60,14 +61,32 @@ STOCK_METADATA: dict[str, StockMetadata] = {
     "BHEL": {"cap": MarketCap.LARGE, "sector": Sector.INDUSTRIALS},
     "POWERGRID": {"cap": MarketCap.LARGE, "sector": Sector.ENERGY},
     "ITC": {"cap": MarketCap.LARGE, "sector": Sector.CONSUMER},
+    "WIPRO": {"cap": MarketCap.LARGE, "sector": Sector.IT},
+    "ADANIGREEN": {"cap": MarketCap.LARGE, "sector": Sector.ENERGY},
+    "MOTHERSON": {"cap": MarketCap.LARGE, "sector": Sector.AUTO},
+    "LT": {"cap": MarketCap.LARGE, "sector": Sector.INDUSTRIALS},
+    "CIPLA": {"cap": MarketCap.LARGE, "sector": Sector.PHARMACEUTICALS},
+    "ETERNAL": {"cap": MarketCap.LARGE, "sector": Sector.CONSUMER},
+    "HINDALCO": {"cap": MarketCap.LARGE, "sector": Sector.METALS},
     # "HINDZINC": {"cap": MarketCap.LARGE, "sector": Sector.METALS},
     # Mid Caps
     "YESBANK": {"cap": MarketCap.MID, "sector": Sector.BANKING},
     "AUROPHARMA": {"cap": MarketCap.MID, "sector": Sector.PHARMACEUTICALS},
+    "KALYANKJIL": {"cap": MarketCap.MID, "sector": Sector.CONSUMER},
+    "HINDCOPPER": {"cap": MarketCap.MID, "sector": Sector.METALS},
+    "ZYDUSLIFE": {"cap": MarketCap.MID, "sector": Sector.PHARMACEUTICALS},
+    "GLENMARK": {"cap": MarketCap.MID, "sector": Sector.PHARMACEUTICALS},
+    "OIL": {"cap": MarketCap.MID, "sector": Sector.ENERGY},
     "FEDERALBNK": {"cap": MarketCap.MID, "sector": Sector.BANKING},
     "COFORGE": {"cap": MarketCap.MID, "sector": Sector.IT},
     "VOLTAS": {"cap": MarketCap.MID, "sector": Sector.CONSUMER},
     # Small Caps
+    "BANDHANBNK": {"cap": MarketCap.SMALL, "sector": Sector.BANKING},
+    "AARTIIND": {"cap": MarketCap.SMALL, "sector": Sector.CHEMICALS},
+    "RBLBANK": {"cap": MarketCap.SMALL, "sector": Sector.BANKING},
+    "JUBLFOOD": {"cap": MarketCap.SMALL, "sector": Sector.CONSUMER},
+    "POWERMECH": {"cap": MarketCap.SMALL, "sector": Sector.INDUSTRIALS},
+    "CENTURYPLY": {"cap": MarketCap.SMALL, "sector": Sector.INDUSTRIALS},
     "SUZLON": {"cap": MarketCap.SMALL, "sector": Sector.ENERGY},
     "KPITTECH": {"cap": MarketCap.SMALL, "sector": Sector.IT},
 }
@@ -98,6 +117,7 @@ SECTOR_CATEGORY_CODES: dict[Sector, int] = {
     Sector.PHARMACEUTICALS: 9,
     Sector.TELECOM: 10,
     Sector.INDUSTRIALS: 11,
+    Sector.CHEMICALS: 12,
 }
 METADATA_FEATURE_COLUMNS = ("Cap", "Sector")
 

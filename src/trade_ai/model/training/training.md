@@ -34,11 +34,13 @@ added sector categories require LightGBM retraining to learn those categories.
    The selected checkpoint is saved only if its validation logloss beats the
    training class-prior baseline. Its sidecar records label schema version,
    selected iteration, and validation metrics. For cache misses in
-   either trainer, downloaders await OpenAlgo and request distinct inclusive
-   30-calendar-day chunks, with up to three attempts per chunk. A chunk that
-   fails all attempts aborts that ticker's download rather than using partial
-   history. Save the checkpoint only when the validation baseline check passes;
-   otherwise keep the existing artifact unchanged.
+   either trainer, the shared `training/util.py` helpers use OpenAlgo to request
+   distinct inclusive 30-calendar-day chunks, with up to three attempts per
+   chunk. A chunk that fails all attempts aborts that ticker's download rather
+   than using partial history. The shared helper logs cache hits, requested date
+   ranges, retries, failures, empty results, and successful cache writes. Save
+   the checkpoint only when the validation baseline check passes; otherwise
+   keep the existing artifact unchanged.
 5. **Prepare and train GRU** when selected. For each ticker, split labeled rows
    chronologically into 80% training and 20% validation, then purge up to 60
    candle rows before the validation boundary so training labels cannot inspect
