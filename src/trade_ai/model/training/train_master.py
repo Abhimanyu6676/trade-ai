@@ -7,7 +7,6 @@ import json
 import os
 import subprocess
 import sys
-import threading
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
@@ -24,10 +23,6 @@ MINDSET_DIRECTIONS: dict[TrainingMindset, tuple[Literal["long", "short"], ...]] 
     "both": ("long", "short"),
 }
 
-TRAINING_LOCK = threading.Lock()
-TRAINING_THREAD: threading.Thread | None = None
-TRAINING_STATE = "idle"
-TRAINING_ERROR: str | None = None
 TRAINING_MODULE = "trade_ai.model.training.train_master"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 LOGS_DIRECTORY = REPOSITORY_ROOT / "logs"
@@ -127,60 +122,6 @@ def run_training(
                 mindset,
                 component,
             )
-
-
-def run_full_training_pipeline() -> bool:
-    """Backward-compatible entry point for the full long/short/RL pipeline."""
-    return run_training("both", "all")
-
-
-def _background_training_worker(
-    mindset: TrainingMindset, component: TrainingComponent
-) -> None:
-    global TRAINING_STATE, TRAINING_ERROR
-    try:
-        completed = run_training(mindset, component)
-        with TRAINING_LOCK:
-            TRAINING_STATE = "completed" if completed else "completed_with_skips"
-            TRAINING_ERROR = None
-        logger.info(
-            "Training completed for %s/%s (all checkpoints accepted=%s).",
-            mindset,
-            component,
-            completed,
-        )
-    except Exception as error:
-        with TRAINING_LOCK:
-            TRAINING_STATE = "failed"
-            TRAINING_ERROR = str(error)
-        logger.error("Background training failed: %s", error)
-
-
-def start_master_training(
-    mindset: TrainingMindset = "both",
-    component: TrainingComponent = "all",
-) -> str:
-    """Start selected training jobs asynchronously in a daemon thread."""
-    global TRAINING_THREAD, TRAINING_STATE, TRAINING_ERROR
-    with TRAINING_LOCK:
-        if TRAINING_THREAD is not None and TRAINING_THREAD.is_alive():
-            return "Training is already running in the background."
-        TRAINING_STATE = "running"
-        TRAINING_ERROR = None
-        TRAINING_THREAD = threading.Thread(
-            target=_background_training_worker,
-            args=(mindset, component),
-            name="trade-ai-training",
-            daemon=True,
-        )
-        TRAINING_THREAD.start()
-    return f"Training started for: {mindset}/{component}."
-
-
-def get_training_status() -> dict[str, str | None]:
-    """Return the current training state and optional error message."""
-    with TRAINING_LOCK:
-        return {"state": TRAINING_STATE, "error": TRAINING_ERROR}
 
 
 def _build_parser() -> argparse.ArgumentParser:
