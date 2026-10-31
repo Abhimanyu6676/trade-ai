@@ -58,10 +58,17 @@ def run_training(
     from .short.train_short_gru import train_short_gru
     from .short.train_short_lgb import train_short_lgb
     from .train_rl import train_meta_agent
+    from .util import download_missing_stock_data
 
     directions = MINDSET_DIRECTIONS[mindset]
     selected_models = _selected_base_models(mindset, component)
     train_rl = component in ("rl", "all")
+    failed_downloads = download_missing_stock_data()
+    if failed_downloads:
+        logger.warning(
+            "Continuing training without unavailable ticker data: %s",
+            ", ".join(failed_downloads),
+        )
     model_manager = get_model_manager()
     model_manager.backup_current_models(selected_models)
     if selected_models or train_rl:

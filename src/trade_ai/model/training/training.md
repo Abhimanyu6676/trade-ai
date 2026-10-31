@@ -54,6 +54,13 @@ terminal can be closed. It records the supplied and resolved arguments in a
 timestamped JSON file and in that run's log under the repository-root `logs/`
 directory. The worker PID is saved to `logs/train.pid`.
 
+At the beginning of every worker run, before model backups or training, the
+worker calls `training/util.py:download_missing_stock_data()`. It
+downloads and saves CSVs for configured tickers whose local history file is
+missing, including for an RL-only run. Existing CSVs are left untouched.
+Download failures are logged and those tickers are skipped by the trainers;
+training modules only load history from local CSV files.
+
 `rl` always trains the one unified policy against all four current specialists,
 even when the first selector is only one side. A long-only or short-only `all`
 run therefore requires compatible OOS streams for the opposite side before the
@@ -76,10 +83,10 @@ uv run python -m trade_ai.model.training.train_master both rl
 
 For each selected direction, `train_master.py` backs up the prior checkpoint
 and sidecar, unloads selected models, and then runs LightGBM followed by GRU.
-Both trainers use the ticker universe in `model/stock_metadata.py`, normalize
-cached or downloaded OHLCV through `training/util.py`, build direction-specific
-labels, and attempt every ticker configured in `STOCK_METADATA`. Tickers with
-missing or insufficient data are skipped and logged. One pooled calendar gives
+Both trainers use the ticker universe in `model/stock_metadata.py`, load local
+OHLCV CSVs through `training/util.py`, build direction-specific labels, and
+attempt every ticker configured in `STOCK_METADATA`. Tickers with missing or
+insufficient data are skipped and logged. One pooled calendar gives
 every ticker the same whole-session boundaries: 55% initial fitting, the next
 15% model selection, the next 20% in four expanding OOS forecast folds, and the
 newest 10% as a final holdout. Up to 60 candle rows are purged before fit
@@ -154,6 +161,16 @@ data or feature calculations, prevent survivorship bias, or make repeated human
 selection on the final holdout safe.
 
 ## Artifacts and loading
+
+`training/util.py:download_missing_stock_data()` downloads missing ticker CSVs
+once at the beginning of every worker run. It uses the chunked downloader in
+the same module, which requests adjacent inclusive 30-calendar-day OpenAlgo
+chunks with up to three attempts.
+The current default download window ends 2026-07-31; a ticker listed after that
+date, such as JPL, is skipped unless a newer local cache exists. Empty pre-listing
+chunks are skipped; an empty chunk after history begins aborts that ticker to
+prevent gaps. Failed downloads are not cached, and existing history caches are
+not automatically refreshed. Model trainers load local CSVs only.
 
 Artifacts are stored under `src/trade_ai/model/.run_cache/`:
 

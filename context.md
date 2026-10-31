@@ -1,6 +1,6 @@
 # trade-ai Current Context
 
-Last reviewed: 2026-10-30.
+Last reviewed: 2026-10-31.
 
 ## Purpose and Runtime Flow
 
@@ -141,13 +141,15 @@ logger instead of creating module-specific loggers. Python's
   contracts are stored in the policy sidecar. Probabilities/agreement are 0–1,
   ATR and volatility ratio are clipped/scaled, portfolio position and return
   are clipped/scaled, and bars are divided by the 60-bar limit.
-- `training/util.py` loads cached ticker CSVs or downloads adjacent inclusive
-  30-calendar-day OpenAlgo chunks with up to three attempts. The current default
-  download window ends 2026-07-31; a ticker listed after that date, such as JPL,
-  is skipped unless a newer local cache exists. Empty pre-listing chunks are
-  skipped; an empty chunk after history begins aborts that ticker to prevent
-  gaps. Failed downloads are not cached, and successful history caches are not
-  automatically refreshed.
+- Every training worker first calls `training/util.py` to download and
+  save missing ticker CSVs, before backing up or training models. This also runs
+  for RL-only requests. Trainer modules load local CSVs only. Downloads use
+  adjacent inclusive 30-calendar-day OpenAlgo chunks with up to three attempts.
+  The current default download window ends 2026-07-31; a ticker listed after
+  that date, such as JPL, is skipped unless a newer local cache exists. Empty
+  pre-listing chunks are skipped; an empty chunk after history begins aborts
+  that ticker to prevent gaps. Failed downloads are not cached, and successful
+  history caches are not automatically refreshed.
 - `training/train_master.py` accepts `long|short|both` (default `both`) and
   `gru|lgb|rl|all` (default `all`). Its CLI validates and records the selectors,
   then launches the training worker in a detached process with a timestamped
@@ -158,6 +160,8 @@ logger instead of creating module-specific loggers. Python's
   shared PPO trainer, then reloads only schema-compatible artifacts. RL is
   common to all four base models. See `model/training/training.md` for lifecycle
   and launcher commands.
+- `training/util.py` provides chunked downloads, missing-cache prefetching, and
+  CSV-only loading for training data.
 - Model artifacts live in `src/trade_ai/model/.run_cache/long/`, `short/`, and
   `rl/`. The PPO sidecar includes the exact base checkpoint hashes, so changing
   any base model invalidates the current meta-agent until it is retrained.

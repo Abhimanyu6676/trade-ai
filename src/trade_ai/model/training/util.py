@@ -20,6 +20,7 @@ from trade_ai.config.trading_config import (
     ENTRY_START_HOUR,
     ENTRY_START_MINUTE,
 )
+from trade_ai.model.stock_metadata import STOCK_METADATA
 from trade_ai.openalgo.openalgo_client import openalgo
 from trade_ai.openalgo.openalgoTypes import TYPE_OPENALGO_EXCHANGE
 from trade_ai.util import merge_ohlcv_history
@@ -294,21 +295,71 @@ def download_stock_history_in_chunks(
     return merge_ohlcv_history(pd.concat(all_chunks))
 
 
-def load_or_fetch_stock_data(ticker: str) -> pd.DataFrame | None:
-    """Load normalized cached history or download it and cache it locally."""
-    os.makedirs(TICK_DATA_DIR, exist_ok=True)
+def download_missing_stock_data() -> list[str]:
+    """Download and save each configured ticker whose CSV cache is missing.
+
+    Returns the tickers that could not be downloaded or saved. Existing cache
+    files are left untouched; trainers read ticker data from CSV only.
+    """
+    cache_directory = Path(TICK_DATA_DIR)
+    cache_directory.mkdir(parents=True, exist_ok=True)
+    failed_tickers: list[str] = []
+    missing_tickers = [
+        ticker
+        for ticker in STOCK_METADATA
+        if not (cache_directory / f"{ticker}_history.csv").is_file()
+    ]
+
+    if not missing_tickers:
+        logger.info("All configured ticker history CSVs are already present.")
+        return failed_tickers
+
+    logger.info(
+        "Downloading missing history for %d configured tickers before training.",
+        len(missing_tickers),
+    )
+    openalgo.initiate()
+    for ticker in missing_tickers:
+        cache_path = cache_directory / f"{ticker}_history.csv"
+        try:
+            frame = download_stock_history_in_chunks(ticker)
+            if frame is None or frame.empty:
+                failed_tickers.append(ticker)
+                logger.warning(
+                    "[%s] No history downloaded; ticker will be skipped.", ticker
+                )
+                continue
+            frame.to_csv(cache_path, index=False)
+            logger.info(
+                "[%s] Saved %d downloaded candles to %s.",
+                ticker,
+                len(frame),
+                cache_path,
+            )
+        except Exception:
+            failed_tickers.append(ticker)
+            logger.exception("[%s] Could not download or save ticker history.", ticker)
+
+    if failed_tickers:
+        logger.warning(
+            "History download failed for %d tickers: %s",
+            len(failed_tickers),
+            ", ".join(failed_tickers),
+        )
+    else:
+        logger.info("Finished downloading all missing ticker history.")
+    return failed_tickers
+
+
+def load_stock_data(ticker: str) -> pd.DataFrame | None:
+    """Load normalized ticker history from its local CSV cache only."""
     stock_csv = os.path.join(TICK_DATA_DIR, f"{ticker}_history.csv")
 
     if os.path.exists(stock_csv):
         logger.info("[%s] Loading local dataset from disk: %s", ticker, stock_csv)
         return merge_ohlcv_history(pd.read_csv(stock_csv))
 
-    logger.info("[%s] Local cache missing. Fetching new data...", ticker)
-    df = download_stock_history_in_chunks(ticker)
-    if df is not None and not df.empty:
-        df.to_csv(stock_csv, index=False)
-        logger.info("[%s] Saved newly downloaded history to %s", ticker, stock_csv)
-        return df
-
-    logger.warning("[%s] No data available to cache.", ticker)
+    logger.warning(
+        "[%s] Local dataset missing at %s; skipping ticker.", ticker, stock_csv
+    )
     return None

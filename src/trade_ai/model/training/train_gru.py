@@ -12,7 +12,6 @@ from trade_ai.config.trading_config import SCHEMA_VERSION, Direction, model_arti
 from trade_ai.logger import logger
 from trade_ai.model.models import GRUTradingBrain
 from trade_ai.model.stock_metadata import STOCK_METADATA
-from trade_ai.openalgo.openalgo_client import openalgo
 
 from ..features import (
     FEATURE_SCHEMA_VERSION,
@@ -33,7 +32,7 @@ from .rl.oos_data import write_oos_predictions
 from .util import (
     eligible_session_dates,
     global_walk_forward_plan,
-    load_or_fetch_stock_data,
+    load_stock_data,
 )
 
 MIN_EPOCHS = 5
@@ -126,7 +125,7 @@ def _collect_gru_partitions(
     """
     partitions: dict[str, GRUDatasetPartition] = {name: {} for name in requests}
     for ticker in STOCK_METADATA:
-        raw_frame = load_or_fetch_stock_data(ticker)
+        raw_frame = load_stock_data(ticker)
         if raw_frame is None or raw_frame.empty:
             logger.warning("Skipping %s: data unavailable.", ticker)
             continue
@@ -313,7 +312,6 @@ def train_gru_model(
         raise ValueError("sequence_length and batch_size must be at least 1")
 
     model_path, _ = model_artifact_paths(direction, "gru")
-    openalgo.initiate()
     model_path.parent.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info("Initializing %s GRU training pipeline on device: %s", direction, device)
@@ -334,7 +332,7 @@ def train_gru_model(
     all_session_dates: set[pd.Timestamp] = set()
     for ticker in tickers:
         logger.info("Collecting eligible session dates for %s...", ticker)
-        raw_frame = load_or_fetch_stock_data(ticker)
+        raw_frame = load_stock_data(ticker)
         if raw_frame is None or raw_frame.empty:
             logger.warning("Skipping %s: data unavailable.", ticker)
             continue

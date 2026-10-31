@@ -13,7 +13,6 @@ from trade_ai.config.trading_config import (
 )
 from trade_ai.logger import logger
 from trade_ai.model.stock_metadata import METADATA_FEATURE_COLUMNS, STOCK_METADATA
-from trade_ai.openalgo.openalgo_client import openalgo
 
 from ..features import (
     FEATURE_SCHEMA_VERSION,
@@ -30,7 +29,7 @@ from .util import (
     atomic_write_json,
     eligible_session_dates,
     global_walk_forward_plan,
-    load_or_fetch_stock_data,
+    load_stock_data,
     WalkForwardPlan,
 )
 
@@ -57,7 +56,7 @@ def _walk_forward_plan() -> WalkForwardPlan:
     """Build one date plan from every ticker in the configured universe."""
     all_session_dates: set[pd.Timestamp] = set()
     for ticker in STOCK_METADATA:
-        raw_df = load_or_fetch_stock_data(ticker)
+        raw_df = load_stock_data(ticker)
         if raw_df is None or raw_df.empty:
             logger.warning("Skipping %s: No data available.", ticker)
             continue
@@ -89,7 +88,7 @@ def _collect_partitions(
 
     for ticker in STOCK_METADATA:
         logger.info("Processing %s feature pipeline for %s...", direction, ticker)
-        raw_df = load_or_fetch_stock_data(ticker)
+        raw_df = load_stock_data(ticker)
         if raw_df is None or raw_df.empty:
             continue
         feature_frame = compute_normalized_features(raw_df, ticker, model_type="lgb")
@@ -186,7 +185,6 @@ def prepare_training_data(direction: Direction = "long") -> PreparedLightGBMData
 def train_lightgbm_model(direction: Direction = "long") -> bool:
     """Train a direction-specific LightGBM model and save its schema artifacts."""
     model_path, schema_path = model_artifact_paths(direction, "lgb")
-    openalgo.initiate()
     model_path.parent.mkdir(parents=True, exist_ok=True)
 
     logger.info("Initializing %s LightGBM training pipeline.", direction)
