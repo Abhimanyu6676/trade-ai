@@ -60,6 +60,10 @@ downloads and saves CSVs for configured tickers whose local history file is
 missing, including for an RL-only run. Existing CSVs are left untouched.
 Download failures are logged and those tickers are skipped by the trainers;
 training modules only load history from local CSV files.
+To run only that prefetch step in the foreground, use
+`uv run python -m trade_ai.model.training.train_master --download-only`. The
+command exits with status 1 if any ticker download fails and does not launch
+training.
 
 `rl` always trains the one unified policy against all four current specialists,
 even when the first selector is only one side. A long-only or short-only `all`
@@ -167,9 +171,11 @@ once at the beginning of every worker run. It uses the chunked downloader in
 the same module, which requests adjacent inclusive 30-calendar-day OpenAlgo
 chunks with up to three attempts.
 The current default download window ends 2026-07-31; a ticker listed after that
-date, such as JPL, is skipped unless a newer local cache exists. Empty pre-listing
-chunks are skipped; an empty chunk after history begins aborts that ticker to
-prevent gaps. Failed downloads are not cached, and existing history caches are
+date, such as JPL, is skipped unless a newer local cache exists. Empty initial
+chunks—including OpenAlgo's “no data available” response—are skipped until the
+first data chunk. Any empty/no-data chunk after history begins rejects the full
+download so a gapped CSV is not saved. If all chunks are empty, the ticker is
+not cached. Failed downloads are not cached, and existing history caches are
 not automatically refreshed. Model trainers load local CSVs only.
 
 Artifacts are stored under `src/trade_ai/model/.run_cache/`:

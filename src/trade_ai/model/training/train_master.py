@@ -134,7 +134,7 @@ def run_training(
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Launch long/short specialist and PPO training as a detached process."
+            "Launch training or download missing historical ticker data."
         )
     )
     parser.add_argument(
@@ -150,6 +150,11 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=("gru", "lgb", "rl", "all"),
         default=None,
         help="Model component to train (default: all).",
+    )
+    parser.add_argument(
+        "--download-only",
+        action="store_true",
+        help="Download and cache missing ticker history, then exit without training.",
     )
     parser.add_argument(
         "--_worker",
@@ -322,6 +327,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Resolve selectors, confirm interactive requests, then always detach work."""
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if args.download_only:
+        if args.mindset is not None or args.component is not None:
+            parser.error("--download-only cannot be combined with training selectors")
+        from .util import download_missing_stock_data
+
+        failed_downloads = download_missing_stock_data()
+        return 1 if failed_downloads else 0
+
     if args._worker:
         if args.mindset is None or args.component is None:
             parser.error("the internal worker requires mindset and component")

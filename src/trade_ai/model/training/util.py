@@ -226,24 +226,38 @@ def download_stock_history_in_chunks(
                         end_date=current_end,
                     )
                 )
+                no_data = False
                 if not isinstance(df_chunk, pd.DataFrame):
                     error_message = (
                         df_chunk.get("message", "non-DataFrame response")
                         if isinstance(df_chunk, dict)
                         else f"unexpected response type {type(df_chunk).__name__}"
                     )
-                    raise RuntimeError(
-                        f"OpenAlgo history request failed: {error_message}"
-                    )
-                if df_chunk.empty:
-                    if all_chunks:
+                    if (
+                        isinstance(df_chunk, dict)
+                        and "no data available" in str(error_message).casefold()
+                    ):
+                        no_data = True
+                    else:
                         raise RuntimeError(
-                            "OpenAlgo returned an empty chunk after history had "
-                            "already started; refusing a gapped dataset"
+                            f"OpenAlgo history request failed: {error_message}"
                         )
+                elif df_chunk.empty:
+                    no_data = True
+
+                if no_data:
+                    if all_chunks:
+                        logger.error(
+                            "[%s] Missing data for %s to %s after history began; "
+                            "rejecting the incomplete download.",
+                            ticker,
+                            current_start,
+                            current_end,
+                        )
+                        return None
                     logger.info(
-                        "[%s] No history in pre-listing range %s to %s; "
-                        "continuing to next chunk.",
+                        "[%s] No history in initial range %s to %s; checking "
+                        "the next chunk.",
                         ticker,
                         current_start,
                         current_end,

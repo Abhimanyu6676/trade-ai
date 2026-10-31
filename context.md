@@ -147,9 +147,9 @@ logger instead of creating module-specific loggers. Python's
   adjacent inclusive 30-calendar-day OpenAlgo chunks with up to three attempts.
   The current default download window ends 2026-07-31; a ticker listed after
   that date, such as JPL, is skipped unless a newer local cache exists. Empty
-  pre-listing chunks are skipped; an empty chunk after history begins aborts
-  that ticker to prevent gaps. Failed downloads are not cached, and successful
-  history caches are not automatically refreshed.
+  initial no-data chunks are skipped until history begins; any empty/no-data
+  chunk afterward rejects the whole download to prevent gaps. Failed downloads
+  are not cached, and successful history caches are not automatically refreshed.
 - `training/train_master.py` accepts `long|short|both` (default `both`) and
   `gru|lgb|rl|all` (default `all`). Its CLI validates and records the selectors,
   then launches the training worker in a detached process with a timestamped
@@ -160,6 +160,9 @@ logger instead of creating module-specific loggers. Python's
   shared PPO trainer, then reloads only schema-compatible artifacts. RL is
   common to all four base models. See `model/training/training.md` for lifecycle
   and launcher commands.
+- `train_master.py --download-only` synchronously downloads and caches missing
+  ticker CSVs without training; it returns status 1 if any ticker download
+  fails.
 - `training/util.py` provides chunked downloads, missing-cache prefetching, and
   CSV-only loading for training data.
 - Model artifacts live in `src/trade_ai/model/.run_cache/long/`, `short/`, and
@@ -251,5 +254,6 @@ logger instead of creating module-specific loggers. Python's
 - Install dependencies with `uv sync`; start the app with
   `uv run python src/trade_ai/app.py`.
 - Train using `uv run python -m trade_ai.model.training.train_master [long|short|both] [gru|lgb|rl|all]`.
+- Download missing training data only with `uv run python -m trade_ai.model.training.train_master --download-only`.
 - No test command is configured in `pyproject.toml`; do not add or run tests
   unless requested.
