@@ -12,6 +12,7 @@ import torch
 from trade_ai.config.trading_config import barrier_percentages
 from trade_ai.logger import logger
 from trade_ai.model.dataStore import dataStore
+from trade_ai.model.modelTypes import PredictionTargetModel
 from trade_ai.openalgo.openalgo_client import TYPE_OPENALGO_EXCHANGE, openalgo
 from trade_ai.util import candles_to_dataframe, merge_ohlcv_history
 
@@ -46,17 +47,19 @@ def predict(
     unrealized_return: float = 0.0,
     bars_in_position: int = 0,
     barrier_multiplier: float = 1.0,
-) -> tuple[int, float, dict]:
-    """Generate an ensemble prediction without changing loaded model state."""
+    target_model: PredictionTargetModel = "meta_ensemble",
+) -> tuple[int | None, float, dict]:
+    """Generate a requested specialist or meta-ensemble prediction."""
     normalized_df = merge_ohlcv_history(raw_df)
     return _predict_normalized(
         normalized_df,
         ticker,
         sequence_length,
-        portfolio_position,
-        unrealized_return,
-        bars_in_position,
-        barrier_multiplier,
+        portfolio_position=portfolio_position,
+        unrealized_return=unrealized_return,
+        bars_in_position=bars_in_position,
+        barrier_multiplier=barrier_multiplier,
+        target_model=target_model,
     )
 
 
@@ -68,9 +71,98 @@ def _predict_normalized(
     unrealized_return: float = 0.0,
     bars_in_position: int = 0,
     barrier_multiplier: float = 1.0,
-) -> tuple[int, float, dict]:
-    """Run all four frozen specialists and the policy on chronological candles."""
+    target_model: PredictionTargetModel = "meta_ensemble",
+) -> tuple[int | None, float, dict]:
+    """Run the selected frozen specialist or the full policy on candles."""
     model_manager = get_model_manager()
+
+    if target_model != "meta_ensemble":
+        model = model_manager.get_model(target_model)
+        if model is None:
+            return 0, 0.0, {
+                "error": f"Requested model {target_model} is unavailable"
+            }
+
+        family = target_model.rsplit("_", maxsplit=1)[1]
+        if family == "lgb":
+            if not isinstance(model, lgb.Booster):
+                return 0, 0.0, {
+                    "error": f"Requested model {target_model} has an invalid model type"
+                }
+            model_features = compute_normalized_features(
+                raw_df, ticker, model_type="lgb"
+            )
+            if model_features.empty:
+                return 0, 0.0, {"error": "Insufficient data after feature warmup"}
+            latest_features = model_features[list(LGB_MODEL_INPUT_COLUMNS)].iloc[[-1]]
+            model_probabilities = np.asarray(
+                model.predict(latest_features), dtype=np.float64
+            )
+            model_probabilities = (
+                model_probabilities[0]
+                if model_probabilities.ndim > 1
+                else model_probabilities
+            )
+        else:
+            if not isinstance(model, GRUTradingBrain):
+                return 0, 0.0, {
+                    "error": f"Requested model {target_model} has an invalid model type"
+                }
+            model_features = compute_normalized_features(
+                raw_df, ticker, model_type="gru"
+            )
+            if model_features.empty:
+                return 0, 0.0, {"error": "Insufficient data after feature warmup"}
+            sequence_features = latest_session_sequence(
+                model_features,
+                list(GRU_MODEL_INPUT_COLUMNS),
+                sequence_length=sequence_length,
+            )
+            if sequence_features is None:
+                return 0, 0.0, {
+                    "error": f"Newest session has fewer than {sequence_length} valid GRU rows"
+                }
+            model.eval()
+            x_tensor = (
+                torch.tensor(sequence_features, dtype=torch.float32)
+                .unsqueeze(0)
+                .to(model_manager.device)
+            )
+            with torch.inference_mode():
+                model_probabilities = (
+                    torch.softmax(model(x_tensor), dim=1).cpu().numpy()[0]
+                )
+
+        if model_probabilities.shape != (3,):
+            return 0, 0.0, {
+                "error": f"Requested model {target_model} did not return three class probabilities"
+            }
+        probabilities_list = model_probabilities.tolist()
+        predicted_class = (-1, 0, 1)[int(np.argmax(model_probabilities))]
+        is_long_lgb = target_model == "long_lgb"
+        is_long_gru = target_model == "long_gru"
+        is_short_lgb = target_model == "short_lgb"
+        is_short_gru = target_model == "short_gru"
+        return None, float(model_probabilities[2]), {
+            "target_model": target_model,
+            "probabilities": probabilities_list,
+            "predicted_class": predicted_class,
+            "lgb_probabilities": probabilities_list if is_long_lgb else None,
+            "gru_probabilities": probabilities_list if is_long_gru else None,
+            "ensemble_probabilities": None,
+            "long_lgb_probabilities": probabilities_list if is_long_lgb else None,
+            "long_gru_probabilities": probabilities_list if is_long_gru else None,
+            "short_lgb_probabilities": probabilities_list if is_short_lgb else None,
+            "short_gru_probabilities": probabilities_list if is_short_gru else None,
+            "long_ensemble_probabilities": None,
+            "short_ensemble_probabilities": None,
+            "meta_action": None,
+            "position_size": None,
+            "barrier_multiplier": None,
+            "take_profit_pct": None,
+            "stop_loss_pct": None,
+        }
+
     model_keys = ("long_lgb", "long_gru", "short_lgb", "short_gru")
     models = {key: model_manager.get_model(key) for key in model_keys}
     missing_models = [key for key, model in models.items() if model is None]
@@ -164,6 +256,9 @@ def _predict_normalized(
         else 0.0
     )
     breakdown = {
+        "target_model": target_model,
+        "probabilities": None,
+        "predicted_class": None,
         # Keep the previous response keys as aliases for the long specialists.
         "lgb_probabilities": probabilities["long_lgb"].tolist(),
         "gru_probabilities": probabilities["long_gru"].tolist(),
@@ -192,7 +287,8 @@ async def predict_with_history(
     unrealized_return: float = 0.0,
     bars_in_position: int = 0,
     barrier_multiplier: float = 1.0,
-) -> tuple[pd.DataFrame, int, float, dict[str, Any]]:
+    target_model: PredictionTargetModel = "meta_ensemble",
+) -> tuple[pd.DataFrame, int | None, float, dict[str, Any]]:
     """Fetch prior history, combine target-day candles, and run inference."""
     try:
         target_date = datetime.date.today()
@@ -247,6 +343,7 @@ async def predict_with_history(
             unrealized_return,
             bars_in_position,
             barrier_multiplier,
+            target_model=target_model,
         )
     except PredictionError:
         raise
@@ -262,16 +359,18 @@ def predict_from_dataframe(
     unrealized_return: float = 0.0,
     bars_in_position: int = 0,
     barrier_multiplier: float = 1.0,
-) -> tuple[pd.DataFrame, int, float, dict[str, Any]]:
+    target_model: PredictionTargetModel = "meta_ensemble",
+) -> tuple[pd.DataFrame, int | None, float, dict[str, Any]]:
     """Run inference on a pre-merged chronological candle frame."""
     signal, confidence, breakdown = _predict_normalized(
         df,
         ticker,
         DEFAULT_SEQUENCE_LENGTH,
-        portfolio_position,
-        unrealized_return,
-        bars_in_position,
-        barrier_multiplier,
+        portfolio_position=portfolio_position,
+        unrealized_return=unrealized_return,
+        bars_in_position=bars_in_position,
+        barrier_multiplier=barrier_multiplier,
+        target_model=target_model,
     )
     if "error" in breakdown:
         message = str(breakdown["error"])

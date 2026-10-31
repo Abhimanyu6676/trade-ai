@@ -6,6 +6,13 @@ TYPE_MODEL_OUTPUTS_EVENTS = Literal["PREDICTION", "STOCK_STATUS"]
 TYPE_MODEL_EVENTS = TYPE_MODEL_INPUT_EVENTS | TYPE_MODEL_OUTPUTS_EVENTS
 
 ModelName = Literal["long_gru", "long_lgb", "short_gru", "short_lgb"]
+PredictionTargetModel = Literal[
+    "meta_ensemble",
+    "long_gru",
+    "long_lgb",
+    "short_gru",
+    "short_lgb",
+]
 MODEL_NAMES: tuple[ModelName, ...] = (
     "long_lgb",
     "long_gru",

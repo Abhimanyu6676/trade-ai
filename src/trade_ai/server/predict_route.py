@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from trade_ai.config.trading_config import BARRIER_MULTIPLIERS
 from trade_ai.logger import logger
+from trade_ai.model.modelTypes import PredictionTargetModel
 from trade_ai.model.prediction_engine import (
     MAX_PREDICTION_LOOKBACK_SESSIONS,
     PredictionError,
@@ -26,6 +27,7 @@ router = APIRouter()
 class PredictionRequest(BaseModel):
     ticker: str = Field(min_length=1, max_length=32)
     exchange: TYPE_OPENALGO_EXCHANGE = "NSE"
+    target_model: PredictionTargetModel = "meta_ensemble"
     days_back: int = Field(
         default=7, ge=1, le=MAX_PREDICTION_LOOKBACK_SESSIONS
     )
@@ -58,17 +60,20 @@ class PredictionRequest(BaseModel):
 # Prediction endpoint response and error types
 @dataclass
 class PredictionBreakdownDataType:
-    lgb_probabilities: list[float]
-    gru_probabilities: list[float]
-    ensemble_probabilities: list[float]
-    long_lgb_probabilities: list[float]
-    long_gru_probabilities: list[float]
-    short_lgb_probabilities: list[float]
-    short_gru_probabilities: list[float]
-    long_ensemble_probabilities: list[float]
-    short_ensemble_probabilities: list[float]
-    meta_action: int
-    position_size: float
+    target_model: PredictionTargetModel
+    probabilities: list[float] | None
+    predicted_class: Literal[-1, 0, 1] | None
+    lgb_probabilities: list[float] | None
+    gru_probabilities: list[float] | None
+    ensemble_probabilities: list[float] | None
+    long_lgb_probabilities: list[float] | None
+    long_gru_probabilities: list[float] | None
+    short_lgb_probabilities: list[float] | None
+    short_gru_probabilities: list[float] | None
+    long_ensemble_probabilities: list[float] | None
+    short_ensemble_probabilities: list[float] | None
+    meta_action: int | None
+    position_size: float | None
     barrier_multiplier: float | None
     take_profit_pct: float | None
     stop_loss_pct: float | None
@@ -80,9 +85,10 @@ class PredictionResponseDataType:
     exchange: Literal["NSE", "BSE"]
     days_back: int | None
     interval: Literal["1m"]
-    signal: Literal[-1, 0, 1]
+    target_model: PredictionTargetModel
+    signal: Literal[-1, 0, 1] | None
     confidence: float
-    position_size: float
+    position_size: float | None
     candles_processed: int
     prediction_timestamp: str
     breakdown: PredictionBreakdownDataType
@@ -117,6 +123,7 @@ async def predict(
             request.exchange,
             supplied,
             sessions=request.days_back,
+            target_model=request.target_model,
             portfolio_position=float(request.portfolio_position),
             unrealized_return=request.unrealized_return,
             bars_in_position=request.bars_in_position,
@@ -143,12 +150,24 @@ async def predict(
                         None if request.candles is not None else request.days_back
                     ),
                     interval=request.interval,
-                    signal=cast(Literal[-1, 0, 1], int(signal)),
+                    target_model=request.target_model,
+                    signal=(
+                        cast(Literal[-1, 0, 1], int(signal))
+                        if signal is not None
+                        else None
+                    ),
                     confidence=float(confidence),
-                    position_size=float(breakdown["position_size"]),
+                    position_size=(
+                        float(breakdown["position_size"])
+                        if breakdown["position_size"] is not None
+                        else None
+                    ),
                     candles_processed=len(candles),
                     prediction_timestamp=str(candles["timestamp"].iloc[-1]),
                     breakdown=PredictionBreakdownDataType(
+                        target_model=breakdown["target_model"],
+                        probabilities=breakdown["probabilities"],
+                        predicted_class=breakdown["predicted_class"],
                         lgb_probabilities=breakdown["lgb_probabilities"],
                         gru_probabilities=breakdown["gru_probabilities"],
                         ensemble_probabilities=breakdown["ensemble_probabilities"],
@@ -170,8 +189,16 @@ async def predict(
                         short_ensemble_probabilities=breakdown[
                             "short_ensemble_probabilities"
                         ],
-                        meta_action=int(breakdown["meta_action"]),
-                        position_size=float(breakdown["position_size"]),
+                        meta_action=(
+                            int(breakdown["meta_action"])
+                            if breakdown["meta_action"] is not None
+                            else None
+                        ),
+                        position_size=(
+                            float(breakdown["position_size"])
+                            if breakdown["position_size"] is not None
+                            else None
+                        ),
                         barrier_multiplier=breakdown["barrier_multiplier"],
                         take_profit_pct=breakdown["take_profit_pct"],
                         stop_loss_pct=breakdown["stop_loss_pct"],

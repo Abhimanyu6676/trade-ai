@@ -26,7 +26,7 @@ The server binds to `0.0.0.0`. Browser origins are controlled by
 | --- | --- | --- | --- |
 | `GET` | `/` | Basic API availability check (`SERVER/SERVER_STATUS`). | `{"intent":"SERVER","data":{"eventType":"SERVER_STATUS","data":{"service":"trade-ai","status":"online"},"error":null}}` |
 | `GET` | `/api/event/test` | Validate event query parameters, fetch/cache recent OHLCV history, and return the normalized ticker with history as a JSON array of row objects (`SERVER/SERVER_STATUS`). | `{"intent":"SERVER","data":{"eventType":"SERVER_STATUS","data":{"ticker":"WIPRO","history":[{"timestamp":"2026-10-28T09:15:00","open":1510.5,"high":1512.0,"low":1509.0,"close":1511.5,"volume":1200}]},"error":null}}` |
-| `POST` | `/api/brain/predict` | Run all four directional specialists and the PPO decision policy using supplied candles or fetched history (`MODEL/PREDICTION`). | Response includes signal (`-1` short, `0` flat, `1` long), confidence, position size, selected bracket multiplier and scaled direction-specific target/stop distances, timestamp, all four specialist probability vectors, both side means, and the action index. |
+| `POST` | `/api/brain/predict` | By default, run all four specialists and PPO; `target_model` can instead select one base specialist (`MODEL/PREDICTION`). | Meta-ensemble responses include signal, confidence, position size, bracket and target/stop distances, all specialist probabilities, side means, and action index. Specialist-only responses include its probabilities and predicted class; signal, position, and PPO/bracket fields are null. |
 | `POST` | `/api/openalgo/history` | Fetch broker history through the OpenAlgo Python client (`OPENALGO/HISTORY`). | `{"intent":"OPENALGO","data":{"eventType":"HISTORY","data":{"symbol":"WIPRO","exchange":"BSE","interval":"1m","candles":[{"timestamp":1790842500,"open":1510.5,"high":1512.0,"low":1509.0,"close":1511.5,"volume":1200,"oi":null}]},"error":null}}` |
 | `GET` | `/api/openalgo/analyser-status` | Fetch OpenAlgo analyser status (`OPENALGO/ANALYSER_STATUS`). | `{"intent":"OPENALGO","data":{"eventType":"ANALYSER_STATUS","data":{"available":true,"mode":"live","analyze_mode":true,"message":"OpenAlgo analyser is online."},"error":null}}` |
 
@@ -108,6 +108,7 @@ their defaults describe a flat position:
 {
   "ticker": "WIPRO",
   "exchange": "BSE",
+  "target_model": "meta_ensemble",
   "days_back": 30,
   "interval": "1m",
   "portfolio_position": 0.0,
@@ -116,6 +117,17 @@ their defaults describe a flat position:
   "barrier_multiplier": 1.0
 }
 ```
+
+`target_model` is optional and defaults to `meta_ensemble`. It accepts
+`long_lgb`, `long_gru`, `short_lgb`, or `short_gru` to query one loaded
+specialist without requiring the other base models or the PPO policy. The
+response's `breakdown.probabilities` is ordered `[-1, 0, 1]` (stop, timeout,
+take profit relative to that specialist's direction), and
+`breakdown.predicted_class` is the highest-probability class. A specialist
+classifier does not choose a portfolio position, so `signal`, `position_size`,
+and PPO/bracket fields are null in this mode; portfolio context fields are not
+used. `confidence` is that specialist's take-profit probability. A missing
+selected model returns HTTP 503.
 
 `barrier_multiplier` is optional and defaults to `1.0`. Pass the active value
 (`0.75`, `1.0`, or `1.25`) when `portfolio_position` describes a position that
@@ -162,10 +174,11 @@ long specialists. `signal` is `-1` for short, `0` for flat, and `1` for long.
 `confidence` is the chosen side's average take-profit probability; it is not a
 calibrated guarantee. A flat action reports zero confidence. Success data also
 includes `prediction_timestamp`, the latest candle used for inference. The
-endpoint requires all four compatible base checkpoints and a PPO policy whose
-schema and recorded base checkpoint hashes match the loaded models; missing or
-stale artifacts return HTTP 503. A data retrieval or inference failure is
-returned in `data.error`.
+default meta-ensemble requires all four compatible base checkpoints and a PPO
+policy whose schema and recorded base checkpoint hashes match the loaded
+models; missing or stale artifacts return HTTP 503. A specialist-only request
+requires only its selected compatible base checkpoint. A data retrieval or
+inference failure is returned in `data.error`.
 Successful prediction logs include this probability breakdown when inference
 completes and immediately before the response is returned.
 Failures also use HTTP 422 for invalid or insufficient input, 502 for upstream

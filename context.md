@@ -14,8 +14,10 @@ orders; a prediction is a decision signal, not an execution request.
 `model/models.py`, then starts Uvicorn in the main process. The model manager
 checks versioned sidecars, direction, ordered input columns, and the four base
 checkpoint hashes recorded in the PPO sidecar. Missing or stale artifacts are
-left unloaded. Prediction requires all four base specialists and a compatible
-PPO policy; otherwise `/api/brain/predict` returns HTTP 503.
+left unloaded. The default meta-ensemble prediction requires all four base
+specialists and a compatible PPO policy; a `target_model` specialist request
+requires only that compatible base model. Missing required artifacts return
+HTTP 503.
 
 `model/prediction_engine.py` gets prior-session history from `model/dataStore.py`,
 fetches target-day candles when callers did not supply them, and runs
@@ -29,7 +31,10 @@ holiday calendars are cached by year; failed, invalid, and empty responses are
 not cached.
 
 `POST /api/brain/predict` accepts ticker, exchange, lookback, interval, optional
-candles, and optional portfolio context. `POST /api/openalgo/history` fetches
+candles, optional `target_model`, and optional portfolio context. The default
+`meta_ensemble` target requires all four specialists and PPO; a base-model
+target requires only that compatible specialist and returns its class
+probabilities without PPO position or bracket outputs. `POST /api/openalgo/history` fetches
 market history; `GET /api/openalgo/analyser-status` queries analyser status.
 All endpoints return `UniversalServerResponse` envelopes. `server/serverTypes.py`
 owns the generic response envelope, module domain types live in their module's
@@ -171,9 +176,11 @@ logger instead of creating module-specific loggers. Python's
 
 ## Prediction Behavior and Known Limits
 
-- Inference requires loaded long LightGBM, long GRU, short LightGBM, short GRU,
-  and a schema-compatible PPO model. The policy selects a flat/long/short action
-  and size multiplier; the endpoint does not place orders.
+- Meta-ensemble inference requires loaded long LightGBM, long GRU, short
+  LightGBM, short GRU, and a schema-compatible PPO model. `target_model` can
+  instead request one base specialist and its stop/timeout/take-profit class
+  probabilities without invoking PPO. The policy selects a flat/long/short
+  action and size multiplier; the endpoint does not place orders.
 - The base models each emit classes in order `[-1, 0, 1]`, meaning
   stop/timeout/take-profit relative to that model's own direction. The PPO
   observation contains all four raw probability vectors and model agreement.
@@ -196,15 +203,18 @@ logger instead of creating module-specific loggers. Python's
   `NSE`), then returns normalized ticker and cached candle history in a
   `SERVER/SERVER_STATUS` response.
 - `POST /api/brain/predict` accepts ticker, `NSE`/`BSE`, `days_back`, `1m`,
-  optional caller candles (1–25,000), and optional portfolio context
+  optional `target_model` (`meta_ensemble` by default, or one of the four base
+  model names), optional caller candles (1–25,000), and optional portfolio context
   (`portfolio_position`, `unrealized_return`, `bars_in_position`, and optional
   `barrier_multiplier`, default 1.0). At least 30 prior trading sessions are loaded;
   `days_back` is capped at 90.
-- Prediction success returns `MODEL/PREDICTION` with signal, confidence,
-  processed candle count, latest `prediction_timestamp`, the four specialist
-  probability arrays, long/short mean arrays, PPO action index, selected
-  position size and barrier multiplier, and scaled direction-specific
-  take-profit/stop-loss distances (null for flat). Class probability arrays use
+- With `target_model=meta_ensemble`, prediction success returns
+  `MODEL/PREDICTION` with signal, confidence, processed candle count, latest
+  `prediction_timestamp`, the four specialist probability arrays, long/short
+  mean arrays, PPO action index, selected position size and barrier multiplier,
+  and scaled direction-specific take-profit/stop-loss distances (null for flat).
+  A base-model target returns `signal` and `position_size` as null, plus its
+  `breakdown.probabilities` and `predicted_class`; probability classes use
   `[-1, 0, 1]` order. Previous
   `lgb_probabilities`, `gru_probabilities`, and `ensemble_probabilities` fields
   remain aliases for the long specialists.
