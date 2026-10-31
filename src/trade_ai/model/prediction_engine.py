@@ -12,7 +12,12 @@ import torch
 from trade_ai.config.trading_config import barrier_percentages
 from trade_ai.logger import logger
 from trade_ai.model.dataStore import dataStore
-from trade_ai.model.modelTypes import PredictionTargetModel
+from trade_ai.model.modelTypes import (
+    DirectionPredictionBreakdown,
+    ModelPredictionBreakdown,
+    PredictionBreakdown,
+    PredictionTargetModel,
+)
 from trade_ai.openalgo.openalgo_client import TYPE_OPENALGO_EXCHANGE, openalgo
 from trade_ai.util import candles_to_dataframe, merge_ohlcv_history
 
@@ -39,6 +44,14 @@ class PredictionError(Exception):
         self.status_code = status_code
 
 
+def _class_prediction(probabilities: np.ndarray) -> ModelPredictionBreakdown:
+    """Represent class probabilities and their predicted trade outcome."""
+    return ModelPredictionBreakdown(
+        probabilities=probabilities.tolist(),
+        predicted_class=(-1, 0, 1)[int(np.argmax(probabilities))],
+    )
+
+
 def predict(
     raw_df: pd.DataFrame,
     ticker: str,
@@ -48,7 +61,7 @@ def predict(
     bars_in_position: int = 0,
     barrier_multiplier: float = 1.0,
     target_model: PredictionTargetModel = "meta_ensemble",
-) -> tuple[int | None, float, dict]:
+) -> tuple[int | None, float, PredictionBreakdown]:
     """Generate a requested specialist or meta-ensemble prediction."""
     normalized_df = merge_ohlcv_history(raw_df)
     return _predict_normalized(
@@ -72,28 +85,28 @@ def _predict_normalized(
     bars_in_position: int = 0,
     barrier_multiplier: float = 1.0,
     target_model: PredictionTargetModel = "meta_ensemble",
-) -> tuple[int | None, float, dict]:
+) -> tuple[int | None, float, PredictionBreakdown]:
     """Run the selected frozen specialist or the full policy on candles."""
     model_manager = get_model_manager()
 
     if target_model != "meta_ensemble":
         model = model_manager.get_model(target_model)
         if model is None:
-            return 0, 0.0, {
-                "error": f"Requested model {target_model} is unavailable"
-            }
+            raise PredictionError(
+                f"Requested model {target_model} is unavailable", 503
+            )
 
         family = target_model.rsplit("_", maxsplit=1)[1]
         if family == "lgb":
             if not isinstance(model, lgb.Booster):
-                return 0, 0.0, {
-                    "error": f"Requested model {target_model} has an invalid model type"
-                }
+                raise PredictionError(
+                    f"Requested model {target_model} has an invalid model type", 500
+                )
             model_features = compute_normalized_features(
                 raw_df, ticker, model_type="lgb"
             )
             if model_features.empty:
-                return 0, 0.0, {"error": "Insufficient data after feature warmup"}
+                raise PredictionError("Insufficient data after feature warmup", 422)
             latest_features = model_features[list(LGB_MODEL_INPUT_COLUMNS)].iloc[[-1]]
             model_probabilities = np.asarray(
                 model.predict(latest_features), dtype=np.float64
@@ -105,23 +118,24 @@ def _predict_normalized(
             )
         else:
             if not isinstance(model, GRUTradingBrain):
-                return 0, 0.0, {
-                    "error": f"Requested model {target_model} has an invalid model type"
-                }
+                raise PredictionError(
+                    f"Requested model {target_model} has an invalid model type", 500
+                )
             model_features = compute_normalized_features(
                 raw_df, ticker, model_type="gru"
             )
             if model_features.empty:
-                return 0, 0.0, {"error": "Insufficient data after feature warmup"}
+                raise PredictionError("Insufficient data after feature warmup", 422)
             sequence_features = latest_session_sequence(
                 model_features,
                 list(GRU_MODEL_INPUT_COLUMNS),
                 sequence_length=sequence_length,
             )
             if sequence_features is None:
-                return 0, 0.0, {
-                    "error": f"Newest session has fewer than {sequence_length} valid GRU rows"
-                }
+                raise PredictionError(
+                    f"Newest session has fewer than {sequence_length} valid GRU rows",
+                    422,
+                )
             model.eval()
             x_tensor = (
                 torch.tensor(sequence_features, dtype=torch.float32)
@@ -134,49 +148,46 @@ def _predict_normalized(
                 )
 
         if model_probabilities.shape != (3,):
-            return 0, 0.0, {
-                "error": f"Requested model {target_model} did not return three class probabilities"
-            }
-        probabilities_list = model_probabilities.tolist()
-        predicted_class = (-1, 0, 1)[int(np.argmax(model_probabilities))]
-        is_long_lgb = target_model == "long_lgb"
-        is_long_gru = target_model == "long_gru"
-        is_short_lgb = target_model == "short_lgb"
-        is_short_gru = target_model == "short_gru"
-        return None, float(model_probabilities[2]), {
-            "target_model": target_model,
-            "probabilities": probabilities_list,
-            "predicted_class": predicted_class,
-            "lgb_probabilities": probabilities_list if is_long_lgb else None,
-            "gru_probabilities": probabilities_list if is_long_gru else None,
-            "ensemble_probabilities": None,
-            "long_lgb_probabilities": probabilities_list if is_long_lgb else None,
-            "long_gru_probabilities": probabilities_list if is_long_gru else None,
-            "short_lgb_probabilities": probabilities_list if is_short_lgb else None,
-            "short_gru_probabilities": probabilities_list if is_short_gru else None,
-            "long_ensemble_probabilities": None,
-            "short_ensemble_probabilities": None,
-            "meta_action": None,
-            "position_size": None,
-            "barrier_multiplier": None,
-            "take_profit_pct": None,
-            "stop_loss_pct": None,
-        }
+            raise PredictionError(
+                f"Requested model {target_model} did not return three class probabilities",
+                500,
+            )
+        model_prediction = _class_prediction(model_probabilities)
+        family = target_model.rsplit("_", maxsplit=1)[1]
+        direction = target_model.split("_", maxsplit=1)[0]
+        direction_prediction = DirectionPredictionBreakdown(
+            lgb=model_prediction if family == "lgb" else None,
+            gru=model_prediction if family == "gru" else None,
+            ensemble_probabilities=None,
+        )
+        return None, float(model_probabilities[2]), PredictionBreakdown(
+            target_model=target_model,
+            signal=None,
+            long=direction_prediction if direction == "long" else None,
+            short=direction_prediction if direction == "short" else None,
+            meta_action=None,
+            position_size=None,
+            barrier_multiplier=None,
+            take_profit_pct=None,
+            stop_loss_pct=None,
+        )
 
     model_keys = ("long_lgb", "long_gru", "short_lgb", "short_gru")
     models = {key: model_manager.get_model(key) for key in model_keys}
     missing_models = [key for key, model in models.items() if model is None]
     if missing_models:
         logger.warning("Base models are not loaded: %s", ", ".join(missing_models))
-        return 0, 0.0, {"error": "Base models unavailable: " + ", ".join(missing_models)}
+        raise PredictionError(
+            "Base models unavailable: " + ", ".join(missing_models), 503
+        )
     meta_agent = model_manager.get_meta_agent()
     if meta_agent is None:
-        return 0, 0.0, {"error": "Validated RL meta-agent is not available"}
+        raise PredictionError("Validated RL meta-agent is not available", 503)
 
     df_lgb_feat = compute_normalized_features(raw_df, ticker, model_type="lgb")
     df_gru_feat = compute_normalized_features(raw_df, ticker, model_type="gru")
     if df_lgb_feat.empty or df_gru_feat.empty:
-        return 0, 0.0, {"error": "Insufficient data after feature warmup"}
+        raise PredictionError("Insufficient data after feature warmup", 422)
 
     latest_lgb = df_lgb_feat[list(LGB_MODEL_INPUT_COLUMNS)].iloc[[-1]]
     sequence_features = latest_session_sequence(
@@ -185,10 +196,8 @@ def _predict_normalized(
         sequence_length=sequence_length,
     )
     if sequence_features is None:
-        return (
-            0,
-            0.0,
-            {"error": f"Newest session has fewer than {sequence_length} valid GRU rows"},
+        raise PredictionError(
+            f"Newest session has fewer than {sequence_length} valid GRU rows", 422
         )
 
     probabilities: dict[str, np.ndarray] = {}
@@ -199,7 +208,7 @@ def _predict_normalized(
             if not isinstance(lgb_model, lgb.Booster) or not isinstance(
                 gru_model, GRUTradingBrain
             ):
-                return 0, 0.0, {"error": f"{direction} model types are invalid"}
+                raise PredictionError(f"{direction} model types are invalid", 500)
             lgb_values = np.asarray(lgb_model.predict(latest_lgb), dtype=np.float64)
             lgb_values = lgb_values[0] if lgb_values.ndim > 1 else lgb_values
             x_tensor = (
@@ -228,7 +237,9 @@ def _predict_normalized(
             raise ValueError("RL agent returned an action outside its schema")
     except Exception as error:
         logger.exception("RL meta-agent inference failed for %s", ticker)
-        return 0, 0.0, {"error": f"RL meta-agent inference failed: {error!s}"}
+        raise PredictionError(
+            f"RL meta-agent inference failed: {error!s}", 500
+        ) from error
 
     position, selected_barrier_multiplier = UNIFIED_ACTIONS[action_index]
     position = float(position)
@@ -255,26 +266,25 @@ def _predict_normalized(
         if signal < 0
         else 0.0
     )
-    breakdown = {
-        "target_model": target_model,
-        "probabilities": None,
-        "predicted_class": None,
-        # Keep the previous response keys as aliases for the long specialists.
-        "lgb_probabilities": probabilities["long_lgb"].tolist(),
-        "gru_probabilities": probabilities["long_gru"].tolist(),
-        "ensemble_probabilities": long_probs.tolist(),
-        "long_lgb_probabilities": probabilities["long_lgb"].tolist(),
-        "long_gru_probabilities": probabilities["long_gru"].tolist(),
-        "short_lgb_probabilities": probabilities["short_lgb"].tolist(),
-        "short_gru_probabilities": probabilities["short_gru"].tolist(),
-        "long_ensemble_probabilities": long_probs.tolist(),
-        "short_ensemble_probabilities": short_probs.tolist(),
-        "meta_action": action_index,
-        "position_size": abs(position),
-        "barrier_multiplier": effective_barrier_multiplier,
-        "take_profit_pct": take_profit_pct,
-        "stop_loss_pct": stop_loss_pct,
-    }
+    breakdown = PredictionBreakdown(
+        target_model=target_model,
+        signal=signal,
+        long=DirectionPredictionBreakdown(
+            lgb=_class_prediction(probabilities["long_lgb"]),
+            gru=_class_prediction(probabilities["long_gru"]),
+            ensemble_probabilities=long_probs.tolist(),
+        ),
+        short=DirectionPredictionBreakdown(
+            lgb=_class_prediction(probabilities["short_lgb"]),
+            gru=_class_prediction(probabilities["short_gru"]),
+            ensemble_probabilities=short_probs.tolist(),
+        ),
+        meta_action=action_index,
+        position_size=abs(position),
+        barrier_multiplier=effective_barrier_multiplier,
+        take_profit_pct=take_profit_pct,
+        stop_loss_pct=stop_loss_pct,
+    )
     return signal, confidence, breakdown
 
 
@@ -288,7 +298,7 @@ async def predict_with_history(
     bars_in_position: int = 0,
     barrier_multiplier: float = 1.0,
     target_model: PredictionTargetModel = "meta_ensemble",
-) -> tuple[pd.DataFrame, int | None, float, dict[str, Any]]:
+) -> tuple[pd.DataFrame, int | None, float, PredictionBreakdown]:
     """Fetch prior history, combine target-day candles, and run inference."""
     try:
         target_date = datetime.date.today()
@@ -360,7 +370,7 @@ def predict_from_dataframe(
     bars_in_position: int = 0,
     barrier_multiplier: float = 1.0,
     target_model: PredictionTargetModel = "meta_ensemble",
-) -> tuple[pd.DataFrame, int | None, float, dict[str, Any]]:
+) -> tuple[pd.DataFrame, int | None, float, PredictionBreakdown]:
     """Run inference on a pre-merged chronological candle frame."""
     signal, confidence, breakdown = _predict_normalized(
         df,
@@ -372,16 +382,6 @@ def predict_from_dataframe(
         barrier_multiplier=barrier_multiplier,
         target_model=target_model,
     )
-    if "error" in breakdown:
-        message = str(breakdown["error"])
-        status_code = (
-            503
-            if "unavailable" in message or "meta-agent" in message
-            else 422
-            if "Insufficient" in message or "fewer than" in message
-            else 500
-        )
-        raise PredictionError(message, status_code)
     logger.info(
         "Prediction result for %s: signal=%s, confidence=%.4f, "
         "candles_processed=%s, latest_candle=%s, breakdown=%s",

@@ -209,15 +209,17 @@ logger instead of creating module-specific loggers. Python's
   `barrier_multiplier`, default 1.0). At least 30 prior trading sessions are loaded;
   `days_back` is capped at 90.
 - With `target_model=meta_ensemble`, prediction success returns
-  `MODEL/PREDICTION` with signal, confidence, processed candle count, latest
-  `prediction_timestamp`, the four specialist probability arrays, long/short
-  mean arrays, PPO action index, selected position size and barrier multiplier,
-  and scaled direction-specific take-profit/stop-loss distances (null for flat).
-  A base-model target returns `signal` and `position_size` as null, plus its
-  `breakdown.probabilities` and `predicted_class`; probability classes use
-  `[-1, 0, 1]` order. Previous
-  `lgb_probabilities`, `gru_probabilities`, and `ensemble_probabilities` fields
-  remain aliases for the long specialists.
+  `MODEL/PREDICTION` with a fixed typed `breakdown` object. Root fields hold
+  `target_model`, final `signal` and `meta_action`, selected `position_size`,
+  and bracket outputs. The nested `long` and `short` objects
+  each contain `lgb`, `gru`, and `ensemble_probabilities`; model objects
+  contain their own `probabilities` and `predicted_class`. Meta-ensemble
+  responses populate both directions; the final signal is in the response's
+  `signal` field. A base-model target populates only the selected direction
+  and model; its `predicted_class` is nested with that model's probabilities,
+  while `signal` and `position_size` are null. Fields that do not
+  apply are null, keeping the schema stable. Probability classes use
+  `[-1, 0, 1]` order.
 - Invalid or insufficient requests use HTTP 422; unavailable base models or PPO
   use 503; upstream history errors use 502; unexpected errors use 500. Errors
   remain strings in `data.error`.

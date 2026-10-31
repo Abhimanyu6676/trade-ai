@@ -120,14 +120,19 @@ their defaults describe a flat position:
 
 `target_model` is optional and defaults to `meta_ensemble`. It accepts
 `long_lgb`, `long_gru`, `short_lgb`, or `short_gru` to query one loaded
-specialist without requiring the other base models or the PPO policy. The
-response's `breakdown.probabilities` is ordered `[-1, 0, 1]` (stop, timeout,
-take profit relative to that specialist's direction), and
-`breakdown.predicted_class` is the highest-probability class. A specialist
+specialist without requiring the other base models or the PPO policy.
+The model's nested probability array is ordered `[-1, 0, 1]` (stop, timeout,
+take profit relative to that specialist's direction), and its nested
+`predicted_class` is the highest-probability class. A specialist
 classifier does not choose a portfolio position, so `signal`, `position_size`,
 and PPO/bracket fields are null in this mode; portfolio context fields are not
-used. `confidence` is that specialist's take-profit probability. A missing
-selected model returns HTTP 503.
+used. The fixed `breakdown` schema has root-level `target_model` and a null
+`signal`; the selected direction
+contains its model object (for example `breakdown.long.lgb`) with
+`probabilities` and `predicted_class`. The opposite direction, other model,
+and ensemble values are null. There is no root probability array; classifier
+probabilities live only under their direction and model. `confidence` is that
+specialist's take-profit probability. A missing selected model returns HTTP 503.
 
 `barrier_multiplier` is optional and defaults to `1.0`. Pass the active value
 (`0.75`, `1.0`, or `1.25`) when `portfolio_position` describes a position that
@@ -158,19 +163,22 @@ fetches today's candles, and merges those transient candles for inference.
 `days_back` can request a longer session lookback; values below 30 still use 30
 sessions. `portfolio_position` accepts a multiplier from -1.5 to +1.5;
 `unrealized_return` is fractional from -1 to +1; `bars_in_position` is an
-integer from 0 through 60. Success `breakdown` contains the four specialist
-probability arrays, long/short mean arrays, `meta_action`, `position_size`,
-`barrier_multiplier`, and `take_profit_pct`/`stop_loss_pct` distances, which
-are null for a flat action. At entry, the policy selects direction, size, and a
+integer from 0 through 60. In the fixed `breakdown` schema, `long` and `short`
+each contain `lgb` and `gru` objects with `probabilities` and
+`predicted_class`, plus `ensemble_probabilities`. Meta-ensemble responses
+populate both directions. The root contains the combined PPO output:
+`signal`, `meta_action`, `position_size`, `barrier_multiplier`, and
+`take_profit_pct`/`stop_loss_pct` distances, which are null for a flat action.
+At entry, the policy selects direction, size, and a
 bracket multiplier of `0.75`, `1.0`, or `1.25`. It scales the baseline 1%
 target and 0.5% stop by the same multiplier, preserving their 2:1 ratio. The
 response reports positive target/stop distance magnitudes; signal direction
 determines which side of entry each distance lies on. ATR is relative
 volatility context for PPO and does not set these distances.
 Class array indices are ordered `[-1, 0, 1]` (stop, timeout, take profit
-relative to that model's side). The previous `lgb_probabilities`,
-`gru_probabilities`, and `ensemble_probabilities` fields remain aliases for the
-long specialists. `signal` is `-1` for short, `0` for flat, and `1` for long.
+relative to that model's side). Fields that do not apply to the selected mode
+are present as null, keeping the response shape stable. `signal` is `-1` for
+short, `0` for flat, and `1` for long.
 `confidence` is the chosen side's average take-profit probability; it is not a
 calibrated guarantee. A flat action reports zero confidence. Success data also
 includes `prediction_timestamp`, the latest candle used for inference. The

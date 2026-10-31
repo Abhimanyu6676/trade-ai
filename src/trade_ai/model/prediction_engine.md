@@ -37,14 +37,25 @@ size and entry bracket width. It does not place trades.
    contract selects flat or a directional size and one of the 0.75, 1.0, or
    1.25 bracket multipliers. At entry, the multiplier scales both the baseline
    target and stop, preserving the 2:1 ratio; it remains fixed while the
-   position is open. The API returns the selected-side take-profit probability
-   as confidence plus specialist probabilities and bracket distances.
+   position is open. The API returns a fixed `PredictionBreakdown` shape:
+   `target_model`, root-level final `signal` and policy fields, and nested
+   `long` and `short` objects. Each direction contains `lgb` and `gru`
+   classifier objects with `probabilities` and `predicted_class`, plus its
+   `ensemble_probabilities`. The final PPO signal/action, selected size, and
+   bracket distances remain at the root. The root has no classifier
+   `predicted_class` or probability array.
+   The selected-side take-profit probability is returned as confidence.
 
 For `target_model` set to a base specialist (`long_lgb`, `long_gru`,
 `short_lgb`, or `short_gru`), only that model is required and run. The API
-returns its probability vector and highest-probability class, ordered as stop,
-timeout, and take profit relative to that model's direction. It does not run
-PPO; signal, position size, and bracket outputs are null.
+returns its highest-probability class and probability vector under that
+specialist's direction/model path (for example, `breakdown.long.lgb`). The
+opposite direction is null, and the unselected model and ensemble
+probabilities in the selected direction are null. Classes are ordered as
+stop, timeout, and take profit relative to that model's direction. It does not
+run PPO; signal, position size, and bracket outputs are null. All fields
+remain present in the fixed response schema, with null used for values that do
+not apply.
 
 ## Current limitations
 

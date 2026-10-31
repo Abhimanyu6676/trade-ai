@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from trade_ai.config.trading_config import BARRIER_MULTIPLIERS
 from trade_ai.logger import logger
-from trade_ai.model.modelTypes import PredictionTargetModel
+from trade_ai.model.modelTypes import PredictionBreakdown, PredictionTargetModel
 from trade_ai.model.prediction_engine import (
     MAX_PREDICTION_LOOKBACK_SESSIONS,
     PredictionError,
@@ -59,27 +59,6 @@ class PredictionRequest(BaseModel):
 
 # Prediction endpoint response and error types
 @dataclass
-class PredictionBreakdownDataType:
-    target_model: PredictionTargetModel
-    probabilities: list[float] | None
-    predicted_class: Literal[-1, 0, 1] | None
-    lgb_probabilities: list[float] | None
-    gru_probabilities: list[float] | None
-    ensemble_probabilities: list[float] | None
-    long_lgb_probabilities: list[float] | None
-    long_gru_probabilities: list[float] | None
-    short_lgb_probabilities: list[float] | None
-    short_gru_probabilities: list[float] | None
-    long_ensemble_probabilities: list[float] | None
-    short_ensemble_probabilities: list[float] | None
-    meta_action: int | None
-    position_size: float | None
-    barrier_multiplier: float | None
-    take_profit_pct: float | None
-    stop_loss_pct: float | None
-
-
-@dataclass
 class PredictionResponseDataType:
     ticker: str
     exchange: Literal["NSE", "BSE"]
@@ -91,7 +70,7 @@ class PredictionResponseDataType:
     position_size: float | None
     candles_processed: int
     prediction_timestamp: str
-    breakdown: PredictionBreakdownDataType
+    breakdown: PredictionBreakdown
 
 
 PredictionServerResponse = UniversalServerResponse[
@@ -157,52 +136,10 @@ async def predict(
                         else None
                     ),
                     confidence=float(confidence),
-                    position_size=(
-                        float(breakdown["position_size"])
-                        if breakdown["position_size"] is not None
-                        else None
-                    ),
+                    position_size=breakdown.position_size,
                     candles_processed=len(candles),
                     prediction_timestamp=str(candles["timestamp"].iloc[-1]),
-                    breakdown=PredictionBreakdownDataType(
-                        target_model=breakdown["target_model"],
-                        probabilities=breakdown["probabilities"],
-                        predicted_class=breakdown["predicted_class"],
-                        lgb_probabilities=breakdown["lgb_probabilities"],
-                        gru_probabilities=breakdown["gru_probabilities"],
-                        ensemble_probabilities=breakdown["ensemble_probabilities"],
-                        long_lgb_probabilities=breakdown[
-                            "long_lgb_probabilities"
-                        ],
-                        long_gru_probabilities=breakdown[
-                            "long_gru_probabilities"
-                        ],
-                        short_lgb_probabilities=breakdown[
-                            "short_lgb_probabilities"
-                        ],
-                        short_gru_probabilities=breakdown[
-                            "short_gru_probabilities"
-                        ],
-                        long_ensemble_probabilities=breakdown[
-                            "long_ensemble_probabilities"
-                        ],
-                        short_ensemble_probabilities=breakdown[
-                            "short_ensemble_probabilities"
-                        ],
-                        meta_action=(
-                            int(breakdown["meta_action"])
-                            if breakdown["meta_action"] is not None
-                            else None
-                        ),
-                        position_size=(
-                            float(breakdown["position_size"])
-                            if breakdown["position_size"] is not None
-                            else None
-                        ),
-                        barrier_multiplier=breakdown["barrier_multiplier"],
-                        take_profit_pct=breakdown["take_profit_pct"],
-                        stop_loss_pct=breakdown["stop_loss_pct"],
-                    ),
+                    breakdown=breakdown,
                 ),
             ),
         )
