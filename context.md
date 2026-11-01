@@ -68,7 +68,7 @@ logger instead of creating module-specific loggers. Python's
   default returns ATR divided by close; `relative=False` returns price-unit
   ATR. Feature construction uses the relative default, and PPO consumes
   `ATR_14_1m` directly as volatility context without dividing it a second time.
-- The current feature schema is version 7: 35 GRU inputs and 37 LightGBM inputs.
+- The current feature schema is version 12: 67 GRU inputs and 69 LightGBM inputs.
   Both directional specialists use the same schemas. Active intervals are 1m,
   5m, 15m, and 1h; 3m and 30m are excluded.
 - `model/dataStore.py` owns the process-wide `CandleStore`, keyed by normalized

@@ -22,7 +22,7 @@ VWAP divides the cumulative sum of price multiplied by volume by the cumulative 
 
 1. Calculate Typical Price: For each period (e.g., 1-minute or 5-minute candle), find the average of `high`, `low`, and `close`:
     ```Typical Price = (high + low + close) / 3```
-1. Multiply by volume: Multiply the Typical Price by that period's volume: 
+1. Multiply by volume: Multiply the Typical Price by that period's volume:
     ```(Typical Price × volume).```
 2. Accumulate: Add these values up continuously from the market open.
 3. Divide: Divide that running total by the total cumulative volume traded since the open.
@@ -35,6 +35,18 @@ Institutions (like mutual funds, hedge funds, and pension managers) move massive
 - Dynamic Support and Resistance: During strong trends, institutional algorithms often treat pullbacks back to the VWAP line as fair-value accumulation zones, causing price to bounce off the line.
 - Standard Deviation Bands: Pros plot standard deviation bands (± 1σ, ± 2σ, etc.) around VWAP to measure statistical extremes (overbought or oversold conditions relative to volume-weighted fair value).
 
+
+## Relative Feature Convention
+
+When VWAP distance is used as a relative feature, normalize the signed distance
+by VWAP:
+
+`(close - VWAP) / VWAP`
+
+The implementation uses this convention when `relative=True` (the default);
+`relative=False` returns the unnormalized price-unit distance. VWAP rate of
+change remains a ratio:
+`(VWAP - VWAP.shift(roc_period)) / VWAP.shift(roc_period)`.
 
 ## Implementation Notes
 
@@ -50,3 +62,18 @@ Institutions (like mutual funds, hedge funds, and pension managers) move massive
   ```VWAP_Slope_Pct= (VWAP − VWAP.shift(5)) / VWAP```
 
   - Why it helps: A positive percentage tells the model that institutional volume is actively driving the average price upward (an uptrend), while a negative percentage indicates a declining volume-weighted trend.
+
+#  Best Usage & How to Combine It with Other Features
+
+VWAP is exceptionally powerful when paired with other features to capture two primary market behaviors: Trend Continuation and Mean Reversion.
+
+    A. Trend Confirmation (Institutional Backing)
+
+        - Rule: When price is consistently above VWAP and VWAP is sloping upward (VWAP_ROC_5 > 0), institutional buyers are aggressively supporting the stock.
+
+        - Combo with EMAs: Pair VWAP_Dist with your macro trend filter (EMA50_Dist). If a stock is trading above both VWAP and the 50 EMA, your LightGBM and GRU models will recognize a high-conviction bullish session.
+
+    B. Mean Reversion (Overextended Spreads)
+        - Rule: VWAP acts like a rubber band. If VWAP_Dist stretches too far away from zero (e.g., price is 3% or 4% away from VWAP in a short window), the price often pulls back to retest the VWAP line.
+
+        - Combo with ATR: Combine VWAP_Dist with your ATR (Volatility) feature. A large VWAP distance combined with high ATR indicates an overextended move prone to mean-reversion, whereas a large VWAP distance with low ATR indicates a steady, persistent trend breakout.

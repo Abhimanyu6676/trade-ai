@@ -5,10 +5,13 @@ import pandas as pd
 from trade_ai.indicator import (
     calculate_atr,
     calculate_ema_distance,
+    calculate_ema_spread,
     calculate_fvg,
     calculate_liquidity_sweep,
+    calculate_macd,
     calculate_rsi,
     calculate_volatility_ratio,
+    calculate_vwap,
 )
 from trade_ai.model.stock_metadata import (
     METADATA_FEATURE_COLUMNS,
@@ -19,7 +22,7 @@ from trade_ai.util import lowercase_ohlcv_columns, resample_ohlcv
 DEFAULT_TIMEFRAMES = ("1m", "5m", "15m", "1h")
 DEFAULT_EMA_SPANS = (9, 21, 50)
 # Increment when the model input feature names, order, or meanings change.
-FEATURE_SCHEMA_VERSION = 7
+FEATURE_SCHEMA_VERSION = 12
 
 
 def _add_multi_timeframe_features(
@@ -55,8 +58,25 @@ def _add_multi_timeframe_features(
         # Compute EMA distances for 9, 21, and 50 spans dynamically
         for span in ema_spans:
             features_tf[f"EMA{span}_Dist_{tf}"] = calculate_ema_distance(
-                tf_df, span=span, relative=relative
+                tf_df["close"], span=span, relative=relative
             )
+
+        # Capture relative positioning between common short, medium, and long EMAs.
+        for span1, span2 in ((9, 21), (9, 50), (21, 50)):
+            features_tf[f"EMA{span1}_{span2}_Spread_{tf}"] = calculate_ema_spread(
+                tf_df["close"], span1=span1, span2=span2, relative=relative
+            )
+
+        # Add the close-relative MACD line, signal, and histogram outputs.
+        macd_features = calculate_macd(tf_df["close"])
+        for feature_name in macd_features.columns:
+            features_tf[f"{feature_name}_{tf}"] = macd_features[feature_name]
+
+        # VWAP takes timestamps as its index and returns close-relative distance
+        # plus session-local rate of change for this timeframe.
+        vwap_features = calculate_vwap(tf_df.set_index("timestamp"), relative=relative)
+        features_tf[f"VWAP_Dist_{tf}"] = vwap_features["VWAP_Dist"].to_numpy()
+        features_tf[f"VWAP_ROC_5_{tf}"] = vwap_features["VWAP_ROC_5"].to_numpy()
 
         features_tf[f"FVG_{tf}"] = calculate_fvg(tf_df)
         features_tf[f"Sweep_{tf}"] = calculate_liquidity_sweep(tf_df, window=20)
@@ -138,6 +158,13 @@ BASE_FEATURE_COLUMNS = [
             f"RSI_14_{timeframe}",
             f"ATR_14_{timeframe}",
             *(f"EMA{span}_Dist_{timeframe}" for span in DEFAULT_EMA_SPANS),
+            *(
+                f"EMA{span1}_{span2}_Spread_{timeframe}"
+                for span1, span2 in ((9, 21), (9, 50), (21, 50))
+            ),
+            *(f"MACD_{name}_Pct_{timeframe}" for name in ("Line", "Signal", "Hist")),
+            f"VWAP_Dist_{timeframe}",
+            f"VWAP_ROC_5_{timeframe}",
             f"FVG_{timeframe}",
             f"Sweep_{timeframe}",
             f"Vol_Ratio_10_30_{timeframe}",

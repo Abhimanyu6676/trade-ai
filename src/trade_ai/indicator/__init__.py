@@ -2,7 +2,11 @@
 
 from trade_ai.indicator.atr import calculate_atr
 from trade_ai.indicator.bag import calculate_bag
-from trade_ai.indicator.ema import calculate_ema, calculate_ema_distance
+from trade_ai.indicator.ema import (
+    calculate_ema,
+    calculate_ema_distance,
+    calculate_ema_spread,
+)
 from trade_ai.indicator.fvg import calculate_fvg, detect_fvg_events
 from trade_ai.indicator.liquidity import (
     calculate_liquidity_extended,
@@ -23,6 +27,7 @@ __all__ = [
     "calculate_bag",
     "calculate_ema",
     "calculate_ema_distance",
+    "calculate_ema_spread",
     "calculate_fvg",
     "calculate_liquidity_extended",
     "calculate_liquidity_sweep",

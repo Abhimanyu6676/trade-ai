@@ -9,20 +9,22 @@
   integer codes for `Cap` and `Sector`, declared as native categorical inputs.
 - On every feature/schema change, update both model counts and their complete
   feature/style lists below, even when only one model's input changes.
+- When adding or refactoring an indicator, check its matching indicator `.md`
+  notes and follow/update them; create the notes file if it does not exist.
 
 `features.py` defines `BASE_FEATURE_COLUMNS`, `GRU_MODEL_INPUT_COLUMNS`, and
 `LGB_MODEL_INPUT_COLUMNS`. `compute_normalized_features(..., model_type=...)`
 encodes metadata for LightGBM and removes metadata columns for GRU. Training,
 inference, and checkpoint validation use the corresponding model-specific input
 tuple. Checkpoint filenames include the schema version; checkpoints also store
-the version and ordered input names. The current feature schema version is 7.
+the version and ordered input names. The current feature schema version is 12.
 
 ## Model input inventory
 
 The tables show every input name and its scaling style. The technical features
-are shared by both models; RSI scaling differs. GRU has 35 inputs. LightGBM has
-those 35 plus two categorical metadata inputs, for 37 total. Active timeframes are 1m, 5m,
-15m, and 1h; 3m and 30m are excluded.
+are shared by both models; RSI scaling differs. GRU has 67 inputs. LightGBM has
+those 67 plus two categorical metadata inputs, for 69 total. Active timeframes
+are 1m, 5m, 15m, and 1h; 3m and 30m are excluded.
 
 ### Returns — 3 features per model
 
@@ -34,7 +36,7 @@ those 35 plus two categorical metadata inputs, for 37 total. Active timeframes a
 | `ROC_5m` | Relative return ratio | Relative return ratio |
 | `ROC_15m` | Relative return ratio | Relative return ratio |
 
-### Multi-timeframe indicators — 32 features per model
+### Multi-timeframe indicators — 64 features per model
 
 The volatility ratio is rolling standard deviation of one-bar percentage
 returns over 10 bars divided by the same measure over 30 bars. Periods are bars
@@ -44,33 +46,65 @@ of the given timeframe (so 10 bars on 5m data spans 50 minutes).
 | --- | --- | --- | --- | --- |
 | 1m | RSI | `RSI_14_1m` | Bounded 0–1 | Bounded 0–100 |
 | 1m | ATR | `ATR_14_1m` | Relative to close | Relative to close |
-| 1m | EMA 9 distance | `EMA9_Dist_1m` | Relative to EMA | Relative to EMA |
-| 1m | EMA 21 distance | `EMA21_Dist_1m` | Relative to EMA | Relative to EMA |
-| 1m | EMA 50 distance | `EMA50_Dist_1m` | Relative to EMA | Relative to EMA |
+| 1m | EMA 9 distance | `EMA9_Dist_1m` | Relative to close | Relative to close |
+| 1m | EMA 21 distance | `EMA21_Dist_1m` | Relative to close | Relative to close |
+| 1m | EMA 50 distance | `EMA50_Dist_1m` | Relative to close | Relative to close |
+| 1m | EMA 9/21 spread | `EMA9_21_Spread_1m` | Relative to close | Relative to close |
+| 1m | EMA 9/50 spread | `EMA9_50_Spread_1m` | Relative to close | Relative to close |
+| 1m | EMA 21/50 spread | `EMA21_50_Spread_1m` | Relative to close | Relative to close |
+| 1m | MACD line | `MACD_Line_Pct_1m` | Relative to close | Relative to close |
+| 1m | MACD signal | `MACD_Signal_Pct_1m` | Relative to close | Relative to close |
+| 1m | MACD histogram | `MACD_Hist_Pct_1m` | Relative to close | Relative to close |
+| 1m | VWAP distance | `VWAP_Dist_1m` | Relative to VWAP | Relative to VWAP |
+| 1m | VWAP 5-bar rate of change | `VWAP_ROC_5_1m` | Relative ratio | Relative ratio |
 | 1m | FVG | `FVG_1m` | Binary 0/1 | Binary 0/1 |
 | 1m | Sweep | `Sweep_1m` | Binary 0/1 | Binary 0/1 |
 | 1m | Volatility ratio | `Vol_Ratio_10_30_1m` | Relative volatility ratio | Relative volatility ratio |
 | 5m | RSI | `RSI_14_5m` | Bounded 0–1 | Bounded 0–100 |
 | 5m | ATR | `ATR_14_5m` | Relative to close | Relative to close |
-| 5m | EMA 9 distance | `EMA9_Dist_5m` | Relative to EMA | Relative to EMA |
-| 5m | EMA 21 distance | `EMA21_Dist_5m` | Relative to EMA | Relative to EMA |
-| 5m | EMA 50 distance | `EMA50_Dist_5m` | Relative to EMA | Relative to EMA |
+| 5m | EMA 9 distance | `EMA9_Dist_5m` | Relative to close | Relative to close |
+| 5m | EMA 21 distance | `EMA21_Dist_5m` | Relative to close | Relative to close |
+| 5m | EMA 50 distance | `EMA50_Dist_5m` | Relative to close | Relative to close |
+| 5m | EMA 9/21 spread | `EMA9_21_Spread_5m` | Relative to close | Relative to close |
+| 5m | EMA 9/50 spread | `EMA9_50_Spread_5m` | Relative to close | Relative to close |
+| 5m | EMA 21/50 spread | `EMA21_50_Spread_5m` | Relative to close | Relative to close |
+| 5m | MACD line | `MACD_Line_Pct_5m` | Relative to close | Relative to close |
+| 5m | MACD signal | `MACD_Signal_Pct_5m` | Relative to close | Relative to close |
+| 5m | MACD histogram | `MACD_Hist_Pct_5m` | Relative to close | Relative to close |
+| 5m | VWAP distance | `VWAP_Dist_5m` | Relative to VWAP | Relative to VWAP |
+| 5m | VWAP 5-bar rate of change | `VWAP_ROC_5_5m` | Relative ratio | Relative ratio |
 | 5m | FVG | `FVG_5m` | Binary 0/1 | Binary 0/1 |
 | 5m | Sweep | `Sweep_5m` | Binary 0/1 | Binary 0/1 |
 | 5m | Volatility ratio | `Vol_Ratio_10_30_5m` | Relative volatility ratio | Relative volatility ratio |
 | 15m | RSI | `RSI_14_15m` | Bounded 0–1 | Bounded 0–100 |
 | 15m | ATR | `ATR_14_15m` | Relative to close | Relative to close |
-| 15m | EMA 9 distance | `EMA9_Dist_15m` | Relative to EMA | Relative to EMA |
-| 15m | EMA 21 distance | `EMA21_Dist_15m` | Relative to EMA | Relative to EMA |
-| 15m | EMA 50 distance | `EMA50_Dist_15m` | Relative to EMA | Relative to EMA |
+| 15m | EMA 9 distance | `EMA9_Dist_15m` | Relative to close | Relative to close |
+| 15m | EMA 21 distance | `EMA21_Dist_15m` | Relative to close | Relative to close |
+| 15m | EMA 50 distance | `EMA50_Dist_15m` | Relative to close | Relative to close |
+| 15m | EMA 9/21 spread | `EMA9_21_Spread_15m` | Relative to close | Relative to close |
+| 15m | EMA 9/50 spread | `EMA9_50_Spread_15m` | Relative to close | Relative to close |
+| 15m | EMA 21/50 spread | `EMA21_50_Spread_15m` | Relative to close | Relative to close |
+| 15m | MACD line | `MACD_Line_Pct_15m` | Relative to close | Relative to close |
+| 15m | MACD signal | `MACD_Signal_Pct_15m` | Relative to close | Relative to close |
+| 15m | MACD histogram | `MACD_Hist_Pct_15m` | Relative to close | Relative to close |
+| 15m | VWAP distance | `VWAP_Dist_15m` | Relative to VWAP | Relative to VWAP |
+| 15m | VWAP 5-bar rate of change | `VWAP_ROC_5_15m` | Relative ratio | Relative ratio |
 | 15m | FVG | `FVG_15m` | Binary 0/1 | Binary 0/1 |
 | 15m | Sweep | `Sweep_15m` | Binary 0/1 | Binary 0/1 |
 | 15m | Volatility ratio | `Vol_Ratio_10_30_15m` | Relative volatility ratio | Relative volatility ratio |
 | 1h | RSI | `RSI_14_1h` | Bounded 0–1 | Bounded 0–100 |
 | 1h | ATR | `ATR_14_1h` | Relative to close | Relative to close |
-| 1h | EMA 9 distance | `EMA9_Dist_1h` | Relative to EMA | Relative to EMA |
-| 1h | EMA 21 distance | `EMA21_Dist_1h` | Relative to EMA | Relative to EMA |
-| 1h | EMA 50 distance | `EMA50_Dist_1h` | Relative to EMA | Relative to EMA |
+| 1h | EMA 9 distance | `EMA9_Dist_1h` | Relative to close | Relative to close |
+| 1h | EMA 21 distance | `EMA21_Dist_1h` | Relative to close | Relative to close |
+| 1h | EMA 50 distance | `EMA50_Dist_1h` | Relative to close | Relative to close |
+| 1h | EMA 9/21 spread | `EMA9_21_Spread_1h` | Relative to close | Relative to close |
+| 1h | EMA 9/50 spread | `EMA9_50_Spread_1h` | Relative to close | Relative to close |
+| 1h | EMA 21/50 spread | `EMA21_50_Spread_1h` | Relative to close | Relative to close |
+| 1h | MACD line | `MACD_Line_Pct_1h` | Relative to close | Relative to close |
+| 1h | MACD signal | `MACD_Signal_Pct_1h` | Relative to close | Relative to close |
+| 1h | MACD histogram | `MACD_Hist_Pct_1h` | Relative to close | Relative to close |
+| 1h | VWAP distance | `VWAP_Dist_1h` | Relative to VWAP | Relative to VWAP |
+| 1h | VWAP 5-bar rate of change | `VWAP_ROC_5_1h` | Relative ratio | Relative ratio |
 | 1h | FVG | `FVG_1h` | Binary 0/1 | Binary 0/1 |
 | 1h | Sweep | `Sweep_1h` | Binary 0/1 | Binary 0/1 |
 | 1h | Volatility ratio | `Vol_Ratio_10_30_1h` | Relative volatility ratio | Relative volatility ratio |
@@ -92,8 +126,12 @@ retrain LightGBM so it can learn that category. Feature width remains fixed.
 
 ## Scaling audit
 
-No model input is a raw price or volume value. ROC, ATR, EMA, and volatility
-ratio inputs are relative/dimensionless ratios. RSI is bounded, with model-
+With the default `relative=True`, no model input is a raw price or volume value.
+ROC, ATR, EMA distance, EMA spread, MACD, VWAP, and volatility ratio inputs are
+relative/dimensionless. EMA distance is `(close - EMA) / close`, and EMA spread
+is `(EMA1 - EMA2) / close`; VWAP distance is `(close - VWAP) / VWAP`. Setting
+`relative=False` makes ATR, EMA distances, EMA spreads, and VWAP distance raw
+price-unit, scale-dependent inputs. RSI is bounded, with model-
 specific ranges shown above. FVG and Sweep inputs are binary 0/1 flags. `Cap`
 and `Sector` are non-relative integer identifiers explicitly declared as
 categorical in LightGBM; they are not continuous measurements. RSI is also

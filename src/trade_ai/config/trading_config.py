@@ -9,7 +9,7 @@ ModelFamily = Literal["gru", "lgb"]
 # Increment whenever a trained artifact's contract changes: features, labels,
 # side-specific behavior, RL observation fields, or action meanings. The more
 # specific feature and label versions remain in manifests for readable errors.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 8
 
 LONG_TAKE_PROFIT_PCT = 0.01
 LONG_STOP_LOSS_PCT = 0.005

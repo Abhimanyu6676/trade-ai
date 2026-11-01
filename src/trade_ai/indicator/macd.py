@@ -1,6 +1,7 @@
 """Relative Moving Average Convergence Divergence calculations."""
 
 import pandas as pd
+from trade_ai.indicator.ema import calculate_ema
 
 
 def calculate_macd(
@@ -13,10 +14,11 @@ def calculate_macd(
 
     Returned values are decimal ratios rather than values multiplied by 100.
     """
-    fast_ema = close.ewm(span=fast_period, adjust=False).mean()
-    slow_ema = close.ewm(span=slow_period, adjust=False).mean()
+    # Reuse the shared EMA implementation for each MACD smoothing stage.
+    fast_ema = calculate_ema(close, span=fast_period)
+    slow_ema = calculate_ema(close, span=slow_period)
     macd_line = fast_ema - slow_ema
-    signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
+    signal_line = calculate_ema(macd_line, span=signal_period)
 
     return pd.DataFrame(
         {

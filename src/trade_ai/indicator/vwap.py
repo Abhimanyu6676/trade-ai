@@ -10,15 +10,17 @@ def calculate_vwap(
     bars: pd.DataFrame,
     *,
     roc_period: int = 5,
+    relative: bool = True,
     session_open: str = "09:15",
     source_timezone: str = "Asia/Kolkata",
 ) -> pd.DataFrame:
-    """Return price-relative VWAP distance and its session-local rate of change.
+    """Return VWAP distance and its session-local rate of change.
 
     ``bars`` must be indexed by candle-open timestamp and contain high, low,
     close, and volume columns. VWAP resets for each local calendar date. The
     rate of change compares VWAP with its value ``roc_period`` candles earlier
-    in the same session.
+    in the same session. With ``relative=True``, distance is normalized by VWAP;
+    otherwise it is returned in price units. Rate of change is always a ratio.
     """
     if roc_period <= 0:
         raise ValueError("roc_period must be greater than zero")
@@ -47,7 +49,10 @@ def calculate_vwap(
 
     close = pd.to_numeric(bars["close"], errors="coerce")
     output = pd.DataFrame(index=bars.index)
-    output["VWAP_Dist"] = close.div(vwap).sub(1.0)
+    if relative:
+        output["VWAP_Dist"] = close.sub(vwap).div(vwap)
+    else:
+        output["VWAP_Dist"] = close.sub(vwap)
     output["VWAP_ROC_5"] = vwap.div(vwap_previous).sub(1.0)
     output = output.replace([np.inf, -np.inf], np.nan)
     return output

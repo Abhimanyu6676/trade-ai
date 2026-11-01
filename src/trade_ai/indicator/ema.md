@@ -20,15 +20,19 @@ For example, a 10-period EMA uses a smoothing multiplier of 2 / (10 + 1) ≈ 0.1
 Apply the recursive multiplier formula to the latest period:
 \(\text{EMA}_{\text{Today}}=(\text{Price}_{\text{Today}}\times \alpha )+(\text{EMA}_{\text{Yesterday}}\times (1-\alpha ))\)
 
-## Important Notes
+## Relative Feature Convention
 
-Keep EMA in relative form instead of prices, so modal can train on different stock prices
+The EMA itself is a price-valued moving average. When using EMA distance as a
+relative feature, normalize the signed distance by the closing price:
 
-- By expressing your EMAs as relative percentage distances—like (df["close"] - ema_values) / ema_values—you solve one of the biggest hurdles in multi-stock machine learning.   
+`(close - EMA) / close`
 
-- Here is why that approach works so well for our pipeline:
-  - Price Scale Independence: A stock trading at ₹600 (like SBIN) and a stock trading at ₹2,500 (like Reliance) will generate vastly different absolute price values. By converting them to relative distances, a 1% pull-back from the 50 EMA looks identical to the neural network whether the stock is priced at ₹50 or ₹5,000.
-  - Multi-Stock Training: Relative EMA distances help keep indicator values comparable across tickers. The active LightGBM and GRU trainers iterate through `STOCK_METADATA` and include these features in their inputs.
+Do not divide this distance by the EMA. Normalizing by close keeps the feature
+scale-independent across assets with different price levels. The raw EMA may
+still be used internally to calculate the distance.
+
+- Relative EMA distances keep indicator values comparable across tickers. The
+  active LightGBM and GRU trainers include these features in their inputs.
 
 
 ## How Professionals & Institutions Use the EMA
