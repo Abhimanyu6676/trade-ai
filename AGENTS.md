@@ -36,3 +36,4 @@ Last reviewed: 2026-11-01.
 - Never include raw OHLCV values as model input features. Keep raw OHLCV in the source frame for calculations only.
 - Never write credential values, tokens, or private environment values into tracked files or logs.
 - Do not add or run tests unless the user asks. No test command is currently configured in `pyproject.toml`.
+- Don't touch `codex-account-switcher-profiles.json`
