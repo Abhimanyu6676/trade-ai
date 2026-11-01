@@ -1,6 +1,6 @@
 # trade-ai Current Context
 
-Last reviewed: 2026-10-31.
+Last reviewed: 2026-11-01.
 
 ## Purpose and Runtime Flow
 
@@ -168,8 +168,9 @@ logger instead of creating module-specific loggers. Python's
 - `train_master.py --download-only` synchronously downloads and caches missing
   ticker CSVs without training; it returns status 1 if any ticker download
   fails.
-- `training/util.py` provides chunked downloads, missing-cache prefetching, and
-  CSV-only loading for training data.
+- `training/util.py` provides chunked downloads, missing-cache prefetching,
+  CSV-only loading, shared ticker feature/label preparation, chronological row
+  bounds, and PPO market metadata for training data.
 - Model artifacts live in `src/trade_ai/model/.run_cache/long/`, `short/`, and
   `rl/`. The PPO sidecar includes the exact base checkpoint hashes, so changing
   any base model invalidates the current meta-agent until it is retrained.
@@ -238,8 +239,8 @@ logger instead of creating module-specific loggers. Python's
 - `src/trade_ai/model/training/labeling.py`: shared direction-aware barrier
   implementation; `training/rl/` joins base OOS predictions.
 - `src/trade_ai/model/training/train_lgb.py`, `train_gru.py`, `train_rl.py`,
-  and `train_master.py`: training implementations, detached CLI launcher, and
-  orchestration.
+  and `train_master.py`: model training implementations, detached CLI launcher,
+  and orchestration.
 - `src/trade_ai/model/training/trading_env.py`: PPO observation contract and
   historical simulator.
 - `src/trade_ai/model/models.py`: four base models, PPO loading, schema checks,

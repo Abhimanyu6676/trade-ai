@@ -1,4 +1,4 @@
-"""Shared history loading and download helpers for model training."""
+"""Shared data loading, preparation, partitioning, and download helpers."""
 
 import asyncio
 import json
@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from time import sleep
-from typing import Iterable
+from typing import Iterable, Literal
 
 import numpy as np
 import pandas as pd
@@ -19,8 +19,12 @@ from trade_ai.config.trading_config import (
     ENTRY_END_MINUTE,
     ENTRY_START_HOUR,
     ENTRY_START_MINUTE,
+    Direction,
+    MAX_HOLDING_PERIOD,
 )
+from trade_ai.model.features import compute_normalized_features
 from trade_ai.model.stock_metadata import STOCK_METADATA
+from trade_ai.model.training.labeling import apply_triple_barrier
 from trade_ai.openalgo.openalgo_client import openalgo
 from trade_ai.openalgo.openalgoTypes import TYPE_OPENALGO_EXCHANGE
 from trade_ai.util import merge_ohlcv_history
@@ -377,3 +381,79 @@ def load_stock_data(ticker: str) -> pd.DataFrame | None:
         "[%s] Local dataset missing at %s; skipping ticker.", ticker, stock_csv
     )
     return None
+
+
+ModelType = Literal["gru", "lgb"]
+
+
+def prepare_directional_training_frame(
+    ticker: str,
+    direction: Direction,
+    model_type: ModelType,
+) -> pd.DataFrame | None:
+    """Load one ticker and return its feature rows with directional targets."""
+    # Load only the local candle cache; training workers own any download step.
+    raw_frame = load_stock_data(ticker)
+    if raw_frame is None or raw_frame.empty:
+        return None
+
+    # Build the requested model's input columns while retaining source columns
+    # such as close for label calculations and PPO simulation metadata.
+    feature_frame = compute_normalized_features(
+        raw_frame,
+        ticker,
+        model_type=model_type,
+    ).reset_index(drop=True)
+
+    # Attach direction-specific outcomes to entry rows. Callers keep this target
+    # separate from the model input columns when they form training examples.
+    feature_frame["target"] = apply_triple_barrier(
+        feature_frame,
+        direction=direction,
+        max_holding_period=MAX_HOLDING_PERIOD,
+    )
+    return feature_frame
+
+
+def date_partition_row_bounds(
+    timestamps: pd.Series,
+    start_date: pd.Timestamp | None,
+    end_date: pd.Timestamp | None,
+    purge_before_end: bool,
+) -> tuple[int, int]:
+    """Map a chronological date range to start-inclusive row bounds."""
+    # Convert optional calendar boundaries into positions in the sorted ticker
+    # frame; omitted boundaries mean the beginning or end of that frame.
+    start_row = (
+        int(timestamps.searchsorted(start_date)) if start_date is not None else 0
+    )
+    end_row = (
+        int(timestamps.searchsorted(end_date))
+        if end_date is not None
+        else len(timestamps)
+    )
+
+    # Purge the label look-ahead horizon at fit boundaries so labels in this
+    # partition cannot inspect candles assigned to the next date partition.
+    if purge_before_end:
+        end_row = max(start_row, end_row - MAX_HOLDING_PERIOD)
+    return start_row, end_row
+
+
+def build_market_metadata(
+    frame: pd.DataFrame,
+    ticker: str,
+    row_indices: Iterable[int] | None = None,
+) -> pd.DataFrame:
+    """Select PPO price and market-context rows aligned to predictions."""
+    # GRU supplies sequence endpoint positions; LightGBM passes its selected
+    # rows directly. Both routes produce one metadata row per prediction.
+    selected = frame if row_indices is None else frame.iloc[list(row_indices)]
+
+    # Keep close for simulated returns and ATR/volatility for PPO observations;
+    # timestamp and ticker let the OOS loader align the four specialist streams.
+    metadata = selected[
+        ["timestamp", "close", "ATR_14_1m", "Vol_Ratio_10_30_1m"]
+    ].copy()
+    metadata.insert(0, "ticker", ticker)
+    return metadata.reset_index(drop=True)

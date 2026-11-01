@@ -13,26 +13,21 @@ from trade_ai.logger import logger
 from trade_ai.model.models import GRUTradingBrain
 from trade_ai.model.stock_metadata import STOCK_METADATA
 
-from ..features import (
-    FEATURE_SCHEMA_VERSION,
-    GRU_MODEL_INPUT_COLUMNS,
-    compute_normalized_features,
-)
+from ..features import FEATURE_SCHEMA_VERSION, GRU_MODEL_INPUT_COLUMNS
 from .gru_sequence_builder import (
     DEFAULT_SEQUENCE_LENGTH,
     session_dates,
     valid_window_starts,
 )
-from .labeling import (
-    LABEL_SCHEMA_VERSION,
-    MAX_HOLDING_PERIOD,
-    apply_triple_barrier,
-)
+from .labeling import LABEL_SCHEMA_VERSION
 from .rl.oos_data import write_oos_predictions
 from .util import (
+    build_market_metadata,
+    date_partition_row_bounds,
     eligible_session_dates,
     global_walk_forward_plan,
     load_stock_data,
+    prepare_directional_training_frame,
 )
 
 MIN_EPOCHS = 5
@@ -125,19 +120,14 @@ def _collect_gru_partitions(
     """
     partitions: dict[str, GRUDatasetPartition] = {name: {} for name in requests}
     for ticker in STOCK_METADATA:
-        raw_frame = load_stock_data(ticker)
-        if raw_frame is None or raw_frame.empty:
+        feature_frame = prepare_directional_training_frame(
+            ticker,
+            direction,
+            model_type="gru",
+        )
+        if feature_frame is None:
             logger.warning("Skipping %s: data unavailable.", ticker)
             continue
-        feature_frame = compute_normalized_features(
-            raw_frame, ticker, model_type="gru"
-        ).reset_index(drop=True)
-        feature_frame["target"] = apply_triple_barrier(
-            feature_frame,
-            direction=direction,
-            max_holding_period=MAX_HOLDING_PERIOD,
-        )
-        del raw_frame
 
         df_clean = feature_frame.dropna(subset=["timestamp"])
         features_np = df_clean[feature_cols].to_numpy(dtype=np.float32)
@@ -150,16 +140,12 @@ def _collect_gru_partitions(
         features_tensor = torch.tensor(features_np, dtype=torch.float32)
 
         for name, (start_date, end_date, purge_before_end, include_metadata) in requests.items():
-            start_row = (
-                int(timestamps.searchsorted(start_date)) if start_date is not None else 0
+            start_row, end_row = date_partition_row_bounds(
+                timestamps,
+                start_date,
+                end_date,
+                purge_before_end,
             )
-            end_row = (
-                int(timestamps.searchsorted(end_date))
-                if end_date is not None
-                else len(df_clean)
-            )
-            if purge_before_end:
-                end_row = max(start_row, end_row - MAX_HOLDING_PERIOD)
             selected_targets = targets_np.copy()
             selected_targets[
                 (row_indices < start_row)
@@ -177,10 +163,11 @@ def _collect_gru_partitions(
             metadata = pd.DataFrame()
             if include_metadata:
                 target_indices = dataset.window_starts + sequence_length - 1
-                metadata = df_clean.iloc[target_indices][
-                    ["timestamp", "close", "ATR_14_1m", "Vol_Ratio_10_30_1m"]
-                ].copy()
-                metadata.insert(0, "ticker", ticker)
+                metadata = build_market_metadata(
+                    df_clean,
+                    ticker,
+                    target_indices,
+                )
             partitions[name][ticker] = (dataset, metadata)
         del feature_frame
 

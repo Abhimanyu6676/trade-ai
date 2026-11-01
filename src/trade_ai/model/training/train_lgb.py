@@ -14,22 +14,17 @@ from trade_ai.config.trading_config import (
 from trade_ai.logger import logger
 from trade_ai.model.stock_metadata import METADATA_FEATURE_COLUMNS, STOCK_METADATA
 
-from ..features import (
-    FEATURE_SCHEMA_VERSION,
-    LGB_MODEL_INPUT_COLUMNS,
-    compute_normalized_features,
-)
-from .labeling import (
-    LABEL_SCHEMA_VERSION,
-    MAX_HOLDING_PERIOD,
-    apply_triple_barrier,
-)
+from ..features import FEATURE_SCHEMA_VERSION, LGB_MODEL_INPUT_COLUMNS
+from .labeling import LABEL_SCHEMA_VERSION
 from .rl.oos_data import sha256_file, write_oos_predictions
 from .util import (
     atomic_write_json,
+    build_market_metadata,
+    date_partition_row_bounds,
     eligible_session_dates,
     global_walk_forward_plan,
     load_stock_data,
+    prepare_directional_training_frame,
     WalkForwardPlan,
 )
 
@@ -88,30 +83,23 @@ def _collect_partitions(
 
     for ticker in STOCK_METADATA:
         logger.info("Processing %s feature pipeline for %s...", direction, ticker)
-        raw_df = load_stock_data(ticker)
-        if raw_df is None or raw_df.empty:
-            continue
-        feature_frame = compute_normalized_features(raw_df, ticker, model_type="lgb")
-        feature_frame = feature_frame.reset_index(drop=True)
-        feature_frame["target"] = apply_triple_barrier(
-            df=feature_frame,
-            direction=direction,
-            max_holding_period=MAX_HOLDING_PERIOD,
+        feature_frame = prepare_directional_training_frame(
+            ticker,
+            direction,
+            model_type="lgb",
         )
+        if feature_frame is None:
+            continue
         timestamps = pd.to_datetime(feature_frame["timestamp"])
         row_indices = np.arange(len(feature_frame))
         labeled_mask = feature_frame["target"].notna().to_numpy()
         for name, (start_date, end_date, purge_before_end, keep_metadata) in requests.items():
-            start_row = (
-                int(timestamps.searchsorted(start_date)) if start_date is not None else 0
+            start_row, end_row = date_partition_row_bounds(
+                timestamps,
+                start_date,
+                end_date,
+                purge_before_end,
             )
-            end_row = (
-                int(timestamps.searchsorted(end_date))
-                if end_date is not None
-                else len(feature_frame)
-            )
-            if purge_before_end:
-                end_row = max(start_row, end_row - MAX_HOLDING_PERIOD)
             mask = labeled_mask & (row_indices >= start_row) & (row_indices < end_row)
             selected = feature_frame.loc[mask]
             if selected.empty:
@@ -120,11 +108,7 @@ def _collect_partitions(
             features_by_name[name].append(selected[feature_cols])
             targets_by_name[name].append(selected["target"].astype(int) + 1)
             if keep_metadata:
-                metadata = selected[
-                    ["timestamp", "close", "ATR_14_1m", "Vol_Ratio_10_30_1m"]
-                ].copy()
-                metadata.insert(0, "ticker", ticker)
-                metadata_by_name[name].append(metadata)
+                metadata_by_name[name].append(build_market_metadata(selected, ticker))
 
     result: dict[str, LightGBMPartition] = {}
     for name in requests:

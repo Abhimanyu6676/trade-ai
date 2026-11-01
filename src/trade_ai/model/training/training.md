@@ -96,6 +96,15 @@ every ticker the same whole-session boundaries: 55% initial fitting, the next
 newest 10% as a final holdout. Up to 60 candle rows are purged before fit
 boundaries so label look-ahead does not cross into the next period.
 
+Both base-model collectors use shared helpers in `training/util.py`.
+`prepare_directional_training_frame()` loads one ticker, builds the requested
+model's features, and attaches direction-specific Triple Barrier targets.
+`date_partition_row_bounds()` applies the shared date splits and fit purge;
+`build_market_metadata()` selects the price and 1-minute context used by PPO.
+The collectors keep model-specific sample construction: LightGBM uses
+individual rows, while GRU builds same-session sequences and attaches each
+target to its sequence endpoint.
+
 LightGBM uses its native categorical `Cap` and `Sector` fields, selects the
 boosting-round count on the middle validation period, and proceeds only if its
 validation logloss beats the training class-prior baseline. GRU uses
