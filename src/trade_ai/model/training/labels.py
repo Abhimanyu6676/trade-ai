@@ -2,7 +2,6 @@
 
 import pandas as pd
 
-from trade_ai.indicator.atr import calculate_atr
 from trade_ai.config.trading_config import (
     ENTRY_END_HOUR,
     ENTRY_END_MINUTE,
@@ -19,29 +18,6 @@ from .labeling import LABEL_SCHEMA_VERSION, apply_triple_barrier as _label
 
 TAKE_PROFIT_PCT = LONG_TAKE_PROFIT_PCT
 STOP_LOSS_PCT = LONG_STOP_LOSS_PCT
-
-
-def add_absolute_label_atr(
-    feature_df: pd.DataFrame,
-    source_df: pd.DataFrame,
-    period: int = 14,
-) -> pd.DataFrame:
-    """Attach prior completed-bar ATR for optional label experiments."""
-    label_atr = calculate_atr(source_df, period=period, relative=False).shift(1)
-    atr_by_timestamp = pd.DataFrame(
-        {
-            "timestamp": source_df["timestamp"].to_numpy(),
-            "ATR_14_1m_absolute": label_atr.to_numpy(),
-        }
-    )
-    return feature_df.merge(
-        atr_by_timestamp,
-        on="timestamp",
-        how="left",
-        sort=False,
-        validate="one_to_one",
-    )
-
 
 def apply_triple_barrier(
     df: pd.DataFrame,
