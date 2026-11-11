@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from trade_ai.config.trading_config import BARRIER_MULTIPLIERS
 from trade_ai.logger import logger
-from trade_ai.model.modelTypes import PredictionBreakdown, PredictionTargetModel
+from trade_ai.model.modelTypes import PREDICTION_MODELS, PredictionBreakdown
 from trade_ai.model.prediction_engine import (
     MAX_PREDICTION_LOOKBACK_SESSIONS,
     PredictionError,
@@ -27,10 +27,8 @@ router = APIRouter()
 class PredictionRequest(BaseModel):
     ticker: str = Field(min_length=1, max_length=32)
     exchange: TYPE_OPENALGO_EXCHANGE = "NSE"
-    target_model: PredictionTargetModel = "meta_ensemble"
-    days_back: int = Field(
-        default=7, ge=1, le=MAX_PREDICTION_LOOKBACK_SESSIONS
-    )
+    target_model: PREDICTION_MODELS = "meta_ensemble"
+    days_back: int = Field(default=7, ge=1, le=MAX_PREDICTION_LOOKBACK_SESSIONS)
     interval: Literal["1m"] = "1m"
     candles: list[OhlcvCandle] | None = Field(
         default=None, min_length=1, max_length=25000
@@ -52,10 +50,9 @@ class PredictionRequest(BaseModel):
     @classmethod
     def barrier_multiplier_must_be_supported(cls, value: float) -> float:
         if value not in BARRIER_MULTIPLIERS:
-            raise ValueError(
-                f"barrier_multiplier must be one of {BARRIER_MULTIPLIERS}"
-            )
+            raise ValueError(f"barrier_multiplier must be one of {BARRIER_MULTIPLIERS}")
         return value
+
 
 # Prediction endpoint response and error types
 @dataclass
@@ -64,7 +61,7 @@ class PredictionResponseDataType:
     exchange: Literal["NSE", "BSE"]
     days_back: int | None
     interval: Literal["1m"]
-    target_model: PredictionTargetModel
+    target_model: PREDICTION_MODELS
     signal: Literal[-1, 0, 1] | None
     confidence: float
     position_size: float | None

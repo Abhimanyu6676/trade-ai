@@ -13,10 +13,10 @@ from trade_ai.config.trading_config import barrier_percentages
 from trade_ai.logger import logger
 from trade_ai.model.dataStore import dataStore
 from trade_ai.model.modelTypes import (
+    PREDICTION_MODELS,
     DirectionPredictionBreakdown,
     ModelPredictionBreakdown,
     PredictionBreakdown,
-    PredictionTargetModel,
 )
 from trade_ai.openalgo.openalgo_client import TYPE_OPENALGO_EXCHANGE, openalgo
 from trade_ai.util import candles_to_dataframe, merge_ohlcv_history
@@ -60,7 +60,7 @@ def predict(
     unrealized_return: float = 0.0,
     bars_in_position: int = 0,
     barrier_multiplier: float = 1.0,
-    target_model: PredictionTargetModel = "meta_ensemble",
+    target_model: PREDICTION_MODELS = "meta_ensemble",
 ) -> tuple[int | None, float, PredictionBreakdown]:
     """Generate a requested specialist or meta-ensemble prediction."""
     normalized_df = merge_ohlcv_history(raw_df)
@@ -84,7 +84,7 @@ def _predict_normalized(
     unrealized_return: float = 0.0,
     bars_in_position: int = 0,
     barrier_multiplier: float = 1.0,
-    target_model: PredictionTargetModel = "meta_ensemble",
+    target_model: PREDICTION_MODELS = "meta_ensemble",
 ) -> tuple[int | None, float, PredictionBreakdown]:
     """Run the selected frozen specialist or the full policy on candles."""
     model_manager = get_model_manager()
@@ -92,9 +92,7 @@ def _predict_normalized(
     if target_model != "meta_ensemble":
         model = model_manager.get_model(target_model)
         if model is None:
-            raise PredictionError(
-                f"Requested model {target_model} is unavailable", 503
-            )
+            raise PredictionError(f"Requested model {target_model} is unavailable", 503)
 
         family = target_model.rsplit("_", maxsplit=1)[1]
         if family == "lgb":
@@ -160,16 +158,20 @@ def _predict_normalized(
             gru=model_prediction if family == "gru" else None,
             ensemble_probabilities=None,
         )
-        return None, float(model_probabilities[2]), PredictionBreakdown(
-            target_model=target_model,
-            signal=None,
-            long=direction_prediction if direction == "long" else None,
-            short=direction_prediction if direction == "short" else None,
-            meta_action=None,
-            position_size=None,
-            barrier_multiplier=None,
-            take_profit_pct=None,
-            stop_loss_pct=None,
+        return (
+            None,
+            float(model_probabilities[2]),
+            PredictionBreakdown(
+                target_model=target_model,
+                signal=None,
+                long=direction_prediction if direction == "long" else None,
+                short=direction_prediction if direction == "short" else None,
+                meta_action=None,
+                position_size=None,
+                barrier_multiplier=None,
+                take_profit_pct=None,
+                stop_loss_pct=None,
+            ),
         )
 
     model_keys = ("long_lgb", "long_gru", "short_lgb", "short_gru")
@@ -297,7 +299,7 @@ async def predict_with_history(
     unrealized_return: float = 0.0,
     bars_in_position: int = 0,
     barrier_multiplier: float = 1.0,
-    target_model: PredictionTargetModel = "meta_ensemble",
+    target_model: PREDICTION_MODELS = "meta_ensemble",
 ) -> tuple[pd.DataFrame, int | None, float, PredictionBreakdown]:
     """Fetch prior history, combine target-day candles, and run inference."""
     try:
@@ -320,9 +322,7 @@ async def predict_with_history(
             ticker,
             exchange,
             target_date,
-            sessions=min(
-                MAX_PREDICTION_LOOKBACK_SESSIONS, max(30, sessions)
-            ),
+            sessions=min(MAX_PREDICTION_LOOKBACK_SESSIONS, max(30, sessions)),
         )
         if history is None or history.empty:
             raise PredictionError(
@@ -369,7 +369,7 @@ def predict_from_dataframe(
     unrealized_return: float = 0.0,
     bars_in_position: int = 0,
     barrier_multiplier: float = 1.0,
-    target_model: PredictionTargetModel = "meta_ensemble",
+    target_model: PREDICTION_MODELS = "meta_ensemble",
 ) -> tuple[pd.DataFrame, int | None, float, PredictionBreakdown]:
     """Run inference on a pre-merged chronological candle frame."""
     signal, confidence, breakdown = _predict_normalized(

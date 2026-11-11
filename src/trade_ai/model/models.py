@@ -26,7 +26,7 @@ from trade_ai.model.features import (
     GRU_MODEL_INPUT_COLUMNS,
     LGB_MODEL_INPUT_COLUMNS,
 )
-from trade_ai.model.modelTypes import MODEL_NAMES, ModelName
+from trade_ai.model.modelTypes import BASE_MODELS, MODEL_NAMES
 from trade_ai.model.training.labeling import LABEL_SCHEMA_VERSION
 from trade_ai.model.training.trading_env import (
     OBSERVATION_FEATURES,
@@ -43,19 +43,19 @@ LGB_MODEL_PATH = LONG_LGB_MODEL_PATH
 LGB_MODEL_SCHEMA_PATH = LONG_LGB_MODEL_SCHEMA_PATH
 GRU_MODEL_PATH = LONG_GRU_MODEL_PATH
 
-MODEL_ARTIFACT_PATHS: dict[ModelName, Path] = {
+MODEL_ARTIFACT_PATHS: dict[BASE_MODELS, Path] = {
     "long_lgb": LONG_LGB_MODEL_PATH,
     "long_gru": LONG_GRU_MODEL_PATH,
     "short_lgb": SHORT_LGB_MODEL_PATH,
     "short_gru": SHORT_GRU_MODEL_PATH,
 }
-MODEL_DIRECTIONS: dict[ModelName, Direction] = {
+MODEL_DIRECTIONS: dict[BASE_MODELS, Direction] = {
     "long_lgb": "long",
     "long_gru": "long",
     "short_lgb": "short",
     "short_gru": "short",
 }
-MODEL_FAMILIES: dict[ModelName, ModelFamily] = {
+MODEL_FAMILIES: dict[BASE_MODELS, ModelFamily] = {
     "long_lgb": "lgb",
     "long_gru": "gru",
     "short_lgb": "lgb",
@@ -98,7 +98,7 @@ class ModelManager:
     def __init__(self) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._lock = threading.RLock()
-        self._models: dict[ModelName, ModelInstance | None] = {
+        self._models: dict[BASE_MODELS, ModelInstance | None] = {
             model_name: None for model_name in MODEL_NAMES
         }
         self._meta_agent: Any | None = None
@@ -106,7 +106,7 @@ class ModelManager:
         self.load_meta_agent()
 
     @staticmethod
-    def _normalize_name(model_name: ModelName | str) -> ModelName:
+    def _normalize_name(model_name: BASE_MODELS | str) -> BASE_MODELS:
         """Map legacy long-only names to their new artifact keys."""
         aliases = {"gru": "long_gru", "lgb": "long_lgb"}
         normalized = aliases.get(model_name, model_name)
@@ -114,7 +114,7 @@ class ModelManager:
             raise ValueError(f"Unknown base model name: {model_name}")
         return normalized  # type: ignore[return-value]
 
-    def get_model(self, model_name: ModelName | str) -> ModelInstance | None:
+    def get_model(self, model_name: BASE_MODELS | str) -> ModelInstance | None:
         """Return a currently loaded long/short base-model instance."""
         with self._lock:
             return self._models[self._normalize_name(model_name)]
@@ -124,7 +124,7 @@ class ModelManager:
         with self._lock:
             return self._meta_agent
 
-    def load_models(self, model_names: tuple[ModelName, ...] = MODEL_NAMES) -> bool:
+    def load_models(self, model_names: tuple[BASE_MODELS, ...] = MODEL_NAMES) -> bool:
         """Load selected checkpoints only after direction and schema validation."""
         loaded_any = False
         with self._lock:
@@ -144,7 +144,9 @@ class ModelManager:
                         continue
                     if family == "lgb":
                         if schema_path is None or not schema_path.is_file():
-                            raise ValueError("LightGBM checkpoint is missing its schema sidecar")
+                            raise ValueError(
+                                "LightGBM checkpoint is missing its schema sidecar"
+                            )
                         with schema_path.open(encoding="utf-8") as schema_file:
                             checkpoint = json.load(schema_file)
                         self._validate_base_schema(checkpoint, model_name)
@@ -175,7 +177,9 @@ class ModelManager:
                             raise ValueError("GRU checkpoint is missing its state_dict")
                         input_weights = state_dict.get("gru.weight_ih_l0")
                         if input_weights is None:
-                            raise ValueError("GRU checkpoint is missing gru.weight_ih_l0")
+                            raise ValueError(
+                                "GRU checkpoint is missing gru.weight_ih_l0"
+                            )
                         if int(input_weights.shape[1]) != len(GRU_MODEL_INPUT_COLUMNS):
                             raise ValueError(
                                 "GRU input width does not match the model schema"
@@ -195,7 +199,7 @@ class ModelManager:
         return loaded_any
 
     @staticmethod
-    def _validate_base_schema(checkpoint: object, model_name: ModelName) -> None:
+    def _validate_base_schema(checkpoint: object, model_name: BASE_MODELS) -> None:
         """Reject checkpoints trained under old strategy, labels, or features."""
         if not isinstance(checkpoint, dict):
             raise ValueError(f"{model_name} checkpoint must contain schema metadata")
@@ -268,7 +272,9 @@ class ModelManager:
                 logger.info("Loaded validated RL meta-agent from %s", RL_MODEL_PATH)
                 return True
             except Exception:
-                logger.exception("Failed to load RL meta-agent; decisions will abstain.")
+                logger.exception(
+                    "Failed to load RL meta-agent; decisions will abstain."
+                )
                 self._meta_agent = None
                 return False
 
@@ -281,12 +287,15 @@ class ModelManager:
                 digest.update(block)
         return digest.hexdigest()
 
-    def unload_models(self, model_names: tuple[ModelName, ...] = MODEL_NAMES) -> None:
+    def unload_models(self, model_names: tuple[BASE_MODELS, ...] = MODEL_NAMES) -> None:
         """Release selected base model references from memory."""
         with self._lock:
             for model_name in model_names:
                 self._models[model_name] = None
-            if any("gru" in name for name in model_names) and self.device.type == "cuda":
+            if (
+                any("gru" in name for name in model_names)
+                and self.device.type == "cuda"
+            ):
                 torch.cuda.empty_cache()
         logger.info("Unloaded base models: %s", ", ".join(model_names))
 
@@ -295,7 +304,7 @@ class ModelManager:
         with self._lock:
             self._meta_agent = None
 
-    def reload_models(self, model_names: tuple[ModelName, ...] = MODEL_NAMES) -> bool:
+    def reload_models(self, model_names: tuple[BASE_MODELS, ...] = MODEL_NAMES) -> bool:
         """Reload selected base model artifacts."""
         return self.load_models(model_names)
 
@@ -304,7 +313,7 @@ class ModelManager:
         return self.load_meta_agent()
 
     def backup_current_models(
-        self, model_names: tuple[ModelName, ...] = MODEL_NAMES
+        self, model_names: tuple[BASE_MODELS, ...] = MODEL_NAMES
     ) -> list[str]:
         """Back up selected checkpoints and schema sidecars with timestamps."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")

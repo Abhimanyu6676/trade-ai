@@ -2,364 +2,158 @@
 
 from __future__ import annotations
 
-import argparse
-import json
-import os
-import subprocess
+import os  # Used to inherit the environment and determine the available CPU set.
+import subprocess  # Used to launch the selected command as a detached child process.
 import sys
+import time
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime  # Used to make a unique timestamped worker log folder.
 from pathlib import Path
-from typing import Literal
 
-from trade_ai.logger import logger
-from trade_ai.model.modelTypes import ModelName
+from trade_ai.model.features import (
+    FEATURE_SCHEMA_VERSION,  # Version the feature schema in each run folder.
+)
+from trade_ai.model.training.labeling import (
+    LABEL_SCHEMA_VERSION,  # Version the label schema in each run folder.
+)
+from trade_ai.model.training.train_master_helper import (
+    TRAINING_COMMAND,
+    TrainingCmds,
+    _available_cpu_ids,
+    parse_training_args,
+    parseTrainingCommand,
+)
 
-TrainingMindset = Literal["long", "short", "both"]
-TrainingComponent = Literal["gru", "lgb", "rl", "all"]
-MINDSET_DIRECTIONS: dict[TrainingMindset, tuple[Literal["long", "short"], ...]] = {
-    "long": ("long",),
-    "short": ("short",),
-    "both": ("long", "short"),
-}
-
-TRAINING_MODULE = "trade_ai.model.training.train_master"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-LOGS_DIRECTORY = REPOSITORY_ROOT / "logs"
-PID_FILE = LOGS_DIRECTORY / "train.pid"
+LOGS_DIRECTORY = (
+    REPOSITORY_ROOT / "logs"
+)  # Store detached worker logs under the repository logs folder.
 
 
-def _selected_base_models(
-    mindset: TrainingMindset, component: TrainingComponent
-) -> tuple[ModelName, ...]:
-    """Resolve selected directional/family pairs into model-manager keys."""
-    families = ("lgb", "gru") if component == "all" else (component,)
-    return tuple(
-        f"{direction}_{family}"
-        for direction in MINDSET_DIRECTIONS[mindset]
-        for family in families
-        if family in ("lgb", "gru")
-    )  # type: ignore[return-value]
+def backgroundTrainingWorker(trainingCmd: TRAINING_COMMAND) -> int:
+    """Placeholder entry point for a selected command in the detached process."""
+
+    print(f"background worker args are {trainingCmd}")
+
+    # Keep this temporary body explicit until the model-stage dispatcher is added.
+    counter = 0  # Start the placeholder work counter at zero.
+
+    while counter < 15:  # Run the placeholder body a fixed number of times.
+        print(f"Counter is : {counter}")  # Emit the current placeholder progress value.
+        time.sleep(5)
+        counter += 1  # Advance the placeholder counter before its next iteration.
+
+    return 0  # Report successful completion of the current placeholder handler.
 
 
-def run_training(
-    mindset: TrainingMindset = "both",
-    component: TrainingComponent = "all",
-) -> bool:
-    """Train requested specialists and optionally the unified meta-agent.
+def startInBackground(trainingArgs: list[TrainingCmds]) -> None:
+    """Start this selection again as a detached worker invocation."""
 
-    RL is a common component over all four frozen base models. Selecting it with
-    a single mindset still validates and trains from the combined OOS streams.
-    """
-    from trade_ai.model.models import get_model_manager
-
-    from .long.train_long_gru import train_long_gru
-    from .long.train_long_lgb import train_long_lgb
-    from .short.train_short_gru import train_short_gru
-    from .short.train_short_lgb import train_short_lgb
-    from .train_rl import train_meta_agent
-    from .util import download_missing_stock_data
-
-    directions = MINDSET_DIRECTIONS[mindset]
-    selected_models = _selected_base_models(mindset, component)
-    train_rl = component in ("rl", "all")
-    failed_downloads = download_missing_stock_data()
-    if failed_downloads:
-        logger.warning(
-            "Continuing training without unavailable ticker data: %s",
-            ", ".join(failed_downloads),
-        )
-    model_manager = get_model_manager()
-    model_manager.backup_current_models(selected_models)
-    if selected_models or train_rl:
-        model_manager.backup_meta_agent()
-        model_manager.unload_meta_agent()
-    if selected_models:
-        model_manager.unload_models(selected_models)
-
-    training_succeeded = False
-    try:
-        all_checkpoints_saved = True
-        if component in ("lgb", "all"):
-            for direction in directions:
-                logger.info("Starting %s LightGBM training.", direction)
-                saved = train_long_lgb() if direction == "long" else train_short_lgb()
-                if not saved:
-                    all_checkpoints_saved = False
-                    logger.warning(
-                        "%s LightGBM did not beat its validation baseline; "
-                        "its existing checkpoint remains unchanged.",
-                        direction,
-                    )
-
-        if component in ("gru", "all"):
-            for direction in directions:
-                logger.info("Starting %s GRU training.", direction)
-                if direction == "long":
-                    train_long_gru(epochs=20)
-                else:
-                    train_short_gru(epochs=20)
-                logger.info("%s GRU training completed.", direction)
-
-        rl_trained = True
-        if train_rl:
-            logger.info("Starting unified PPO meta-agent training.")
-            rl_trained = train_meta_agent()
-            if not rl_trained:
-                logger.warning(
-                    "The RL policy did not beat the flat selection baseline; "
-                    "its previous artifact was not replaced."
-                )
-
-        training_succeeded = True
-        return all_checkpoints_saved and rl_trained
-    except Exception:
-        logger.exception("Training failed for %s/%s.", mindset, component)
-        raise
-    finally:
-        if training_succeeded:
-            if selected_models:
-                model_manager.reload_models(selected_models)
-            if selected_models or train_rl:
-                model_manager.reload_meta_agent()
-        else:
-            logger.warning(
-                "Skipping model reload after failed %s/%s training; affected models "
-                "will remain unloaded until reloaded explicitly or the app restarts.",
-                mindset,
-                component,
-            )
-
-
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Launch training or download missing historical ticker data."
-        )
-    )
-    parser.add_argument(
-        "mindset",
-        nargs="?",
-        choices=("long", "short", "both"),
-        default=None,
-        help="Directional specialists to train (default: both).",
-    )
-    parser.add_argument(
-        "component",
-        nargs="?",
-        choices=("gru", "lgb", "rl", "all"),
-        default=None,
-        help="Model component to train (default: all).",
-    )
-    parser.add_argument(
-        "--download-only",
-        action="store_true",
-        help="Download and cache missing ticker history, then exit without training.",
-    )
-    parser.add_argument(
-        "--_worker",
-        action="store_true",
-        help=argparse.SUPPRESS,
-    )
-    return parser
-
-
-def _prompt_selector(label: str, choices: Sequence[str], default: str) -> str:
-    """Prompt for one supported selector, accepting either its name or number."""
-    print(f"Select {label}:")
-    for index, choice in enumerate(choices, start=1):
-        marker = " (default)" if choice == default else ""
-        print(f"  {index}. {choice}{marker}")
-
-    while True:
-        try:
-            value = input(f"{label} [{default}]: ").strip().casefold()
-        except EOFError:
-            return default
-        if not value:
-            return default
-        if value.isdecimal():
-            index = int(value) - 1
-            if 0 <= index < len(choices):
-                return choices[index]
-        if value in choices:
-            return value
-        print(f"Choose one of: {', '.join(choices)}.")
-
-
-def _confirm_start(mindset: str, component: str) -> bool:
-    """Require an explicit yes before launching provided foreground selectors."""
-    print(f"Training selection: mindset={mindset}, component={component}")
-    while True:
-        try:
-            answer = input("Launch this training run in the background? [y/N]: ")
-        except EOFError:
-            return False
-        normalized = answer.strip().casefold()
-        if normalized in {"y", "yes"}:
-            return True
-        if normalized in {"", "n", "no"}:
-            return False
-        print("Please answer yes or no.")
-
-
-def _write_json_atomically(path: Path, data: dict[str, object]) -> None:
-    temporary_path = path.with_suffix(path.suffix + ".tmp")
-    temporary_path.write_text(
-        json.dumps(data, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    temporary_path.replace(path)
-
-
-def _active_training_pid() -> int | None:
-    """Return the PID from the pid file when it still runs this module."""
-    try:
-        pid = int(PID_FILE.read_text(encoding="utf-8").strip())
-    except FileNotFoundError, ValueError, OSError:
-        return None
-
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return None
-    except PermissionError:
-        return pid
-
-    command_line_path = Path("/proc") / str(pid) / "cmdline"
-    try:
-        command_line = command_line_path.read_bytes().replace(b"\0", b" ")
-    except OSError:
-        return pid
-    if TRAINING_MODULE.encode() in command_line:
-        return pid
-    return None
-
-
-def _launch_training(
-    mindset: TrainingMindset,
-    component: TrainingComponent,
-    provided_args: list[str],
-    interactive: bool,
-) -> int:
-    """Persist launch arguments and spawn the training worker detached."""
-    active_pid = _active_training_pid()
-    if active_pid is not None:
-        print(
-            f"Training is already running (PID {active_pid}, recorded in {PID_FILE}).",
-            file=sys.stderr,
-        )
-        return 1
-
-    LOGS_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    started_at = datetime.now().astimezone()
-    run_id = started_at.strftime("%Y%m%d_%H%M%S_%f")
-    run_name = f"train_{mindset}_{component}_{run_id}"
-    log_path = LOGS_DIRECTORY / f"{run_name}.log"
-    metadata_path = LOGS_DIRECTORY / f"{run_name}.json"
-    metadata: dict[str, object] = {
-        "status": "launching",
-        "requested_at": started_at.isoformat(timespec="seconds"),
-        "provided_args": provided_args,
-        "resolved_args": {"mindset": mindset, "component": component},
-        "interactive_foreground": interactive,
-        "log_file": str(log_path.resolve()),
-    }
-    launch_record = {
-        "event": "training_launch_requested",
-        "provided_args": provided_args,
-        "resolved_args": metadata["resolved_args"],
-        "metadata_file": str(metadata_path.resolve()),
-    }
-    _write_json_atomically(metadata_path, metadata)
-
-    command = [
-        sys.executable,
-        "-u",
-        "-m",
-        TRAINING_MODULE,
-        "--_worker",
-        mindset,
-        component,
+    # Reuse the current interpreter and module command so the child runs in the same environment.
+    workerCommand = [
+        sys.executable,  # Reuse the current Python environment.
+        "-u",  # Write worker output immediately so the log stays current.
+        "-m",  # Run the module through Python's module launcher.
+        "trade_ai.model.training.train_master",
     ]
-    try:
-        with log_path.open("a", encoding="utf-8") as log_file:
-            log_file.write(json.dumps(launch_record, sort_keys=True) + "\n")
-            log_file.flush()
-            process = subprocess.Popen(
-                command,
-                cwd=REPOSITORY_ROOT,
-                stdin=subprocess.DEVNULL,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-                close_fds=True,
-            )
-    except OSError as error:
-        metadata["status"] = "launch_failed"
-        metadata["error"] = str(error)
-        _write_json_atomically(metadata_path, metadata)
-        print(f"Could not start training: {error}", file=sys.stderr)
-        return 1
 
-    metadata["status"] = "launched"
-    metadata["pid"] = process.pid
-    _write_json_atomically(metadata_path, metadata)
-    temporary_pid_file = PID_FILE.with_suffix(".pid.tmp")
-    temporary_pid_file.write_text(f"{process.pid}\n", encoding="utf-8")
-    temporary_pid_file.replace(PID_FILE)
-    logger.info(
-        "Training launcher accepted args=%s; resolved mindset=%s component=%s; "
-        "pid=%s; log=%s",
-        provided_args,
-        mindset,
-        component,
-        process.pid,
-        log_path.resolve(),
+    # Add each selected option back as a CLI flag so the worker parses the same selection.
+    workerCommand.extend(f"--{trainingArg}" for trainingArg in trainingArgs)
+    workerCommand.append("--worker")  # add background-worker Arg in main().
+
+    # Give numerical libraries the full CPU count available to this process.
+    cpu_count = len(_available_cpu_ids())
+    # Preserve the launcher's configured environment.
+    worker_environment = os.environ.copy()
+    for variable in (
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "NUMEXPR_MAX_THREADS",
+    ):  # Cover the common native thread pools used by model training.
+        worker_environment[variable] = str(
+            cpu_count
+        )  # Override any inherited thread limit.
+    worker_environment["TRADE_AI_WORKER_CPU_COUNT"] = str(
+        cpu_count
+    )  # Let LightGBM use the same full count.
+    worker_environment["TRADE_AI_BASE_TRAINING_CPUS"] = str(
+        cpu_count
+    )  # Give base training every available CPU.
+    worker_environment["TRADE_AI_PPO_CPUS"] = str(
+        cpu_count
+    )  # Give PPO training every available CPU.
+
+    # Create a versioned run directory so each worker's complete output is retained.
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    run_directory = LOGS_DIRECTORY / (
+        f"FS_{FEATURE_SCHEMA_VERSION}_LS_{LABEL_SCHEMA_VERSION}_{timestamp}"
     )
-    print(f"Training PID: {process.pid}")
-    print(f"Training log: {log_path.resolve()}")
-    print(f"Run metadata: {metadata_path.resolve()}")
-    return 0
+    run_directory.mkdir(parents=True, exist_ok=True)
+    worker_log_path = run_directory / "worker.log"
+
+    # Redirect both output streams to the log while detaching the worker from the terminal.
+    with worker_log_path.open("w", encoding="utf-8", buffering=1) as worker_log:
+        process = subprocess.Popen(  # Create the new worker process.
+            workerCommand,  # Run the same module with the selected options and worker flag.
+            cwd=REPOSITORY_ROOT,  # Keep imports and relative paths rooted in the repository.
+            stdin=subprocess.DEVNULL,  # Prevent the worker from waiting for terminal input.
+            stdout=worker_log,  # Save all worker standard output in its run directory.
+            stderr=subprocess.STDOUT,  # Save worker errors in the same log file.
+            env=worker_environment,  # Pass the full-core thread settings into the worker.
+            start_new_session=True,  # Detach the child from the launcher's terminal session.
+        )  # Finish starting the detached worker.
+
+    worker_pid_path = run_directory / "worker.pid"
+    worker_pid_path.write_text(f"{process.pid}\n", encoding="utf-8")
+
+    print(f"Training worker started with PID: {process.pid}")
+    print(f"Training worker log: {worker_log_path}")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Resolve selectors, confirm interactive requests, then always detach work."""
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-    if args.download_only:
-        if args.mindset is not None or args.component is not None:
-            parser.error("--download-only cannot be combined with training selectors")
-        from .util import download_missing_stock_data
+    """Parse the selected command and route it to the parent or worker flow."""
 
-        failed_downloads = download_missing_stock_data()
-        return 1 if failed_downloads else 0
+    # 1. Fallback to sys.argv[1:] if no explicit argv sequence is provided
+    if argv is None:
+        argv = sys.argv[1:]
 
-    if args._worker:
-        if args.mindset is None or args.component is None:
-            parser.error("the internal worker requires mindset and component")
-        return 0 if run_training(args.mindset, args.component) else 1
+    args_list = list(argv)
+    print(f"Received arguments in main: {args_list}")
 
-    provided_args = [
-        value for value in (args.mindset, args.component) if value is not None
-    ]
-    interactive = sys.stdin.isatty()
-    if interactive and not provided_args:
-        mindset = _prompt_selector("mindset", ("long", "short", "both"), "both")
-        component = _prompt_selector("component", ("gru", "lgb", "rl", "all"), "all")
+    # Route only the explicit worker flag to the background command handler.
+    if "--worker" in args_list:
+        print(f"This worker thread command, and args are {args_list}")
+
+        trainingArgs = parse_training_args(args_list)
+        if not trainingArgs:
+            print("Training Args is invalid while starting worker, skipping worker")
+            return 1
+        else:
+            trainingCmd = parseTrainingCommand(trainingArgs)
+            if trainingCmd is not None:
+                # Return the worker handler's status to the child process exit code.
+                return backgroundTrainingWorker(trainingCmd)
+            else:
+                print("Training Cmd is invalid while starting worker, skipping worker")
+                return 1
+
     else:
-        mindset = args.mindset or "both"
-        component = args.component or "all"
-        if interactive and not _confirm_start(mindset, component):
-            print("Training launch cancelled.")
-            return 0
+        print("Now parsing args and sending with working after confirmation")
 
-    return _launch_training(
-        mindset,
-        component,
-        provided_args=provided_args,
-        interactive=interactive,
-    )
+        trainingArgs = parse_training_args(args_list)
+        print(f"trainingArgs: {trainingArgs}")
+
+        if not trainingArgs:
+            print("Training command is invalid, Please try again")
+            return 1
+        else:
+            startInBackground(trainingArgs)
+
+    # Report that the foreground process has handed work to its detached child.
+    print("Training Foreground Script ended, after starting background worker thread")
+    return 0
 
 
 if __name__ == "__main__":

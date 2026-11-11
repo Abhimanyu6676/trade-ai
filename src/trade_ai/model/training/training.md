@@ -39,31 +39,18 @@ PPO artifacts must all be retrained before prediction resumes.
 
 ## Training selectors
 
-Run `train_master.py` with two optional positional arguments:
+`train_master_helper.py` supports these model and download flags:
+`--long_lgb`, `--long_gru`, `--short_lgb`, `--short_gru`, `--meta_ensemble`,
+`--download`, and `--all`. In a foreground interactive invocation,
+`parse_training_args()` shows the multi-option selector and returns the selected
+flags. A detached invocation includes `--worker`; the parser then returns its
+flags directly without displaying the selector.
 
-1. Mindset: `long`, `short`, or `both` (default `both`).
-2. Component: `gru`, `lgb`, `rl`, or `all` (default `all`).
-
-The launcher validates both selectors before starting. In an interactive
-foreground shell, no arguments opens selectors for both values; supplied
-arguments are shown for yes/no confirmation. In a non-interactive shell or
-background launch, omitted arguments use the defaults and supplied arguments
-are validated without prompting. Every accepted run starts the actual training
-worker in a detached process, so the launcher returns immediately and the
-terminal can be closed. It records the supplied and resolved arguments in a
-timestamped JSON file and in that run's log under the repository-root `logs/`
-directory. The worker PID is saved to `logs/train.pid`.
-
-At the beginning of every worker run, before model backups or training, the
-worker calls `training/util.py:download_missing_stock_data()`. It
-downloads and saves CSVs for configured tickers whose local history file is
-missing, including for an RL-only run. Existing CSVs are left untouched.
-Download failures are logged and those tickers are skipped by the trainers;
-training modules only load history from local CSV files.
-To run only that prefetch step in the foreground, use
-`uv run python -m trade_ai.model.training.train_master --download-only`. The
-command exits with status 1 if any ticker download fails and does not launch
-training.
+`startInBackground()` launches the same `train_master` module with every
+selected flag plus `--worker`, using the current Python interpreter and a
+detached session. The child converts the parsed flags to `TRAINING_COMMAND` and
+calls `backgroundTrainingWorker()`. That handler is currently a placeholder;
+dispatching download and model-training stages remains pending.
 
 `rl` always trains the one unified policy against all four current specialists,
 even when the first selector is only one side. A long-only or short-only `all`
@@ -73,20 +60,46 @@ common policy can train.
 Examples:
 
 ```sh
-# Launch every specialist, then the shared policy, in the background
-uv run python -m trade_ai.model.training.train_master both all
+# Request all supported model options
+uv run python -m trade_ai.model.training.train_master --all
 
-# Launch only short-side GRU in the background
-uv run python -m trade_ai.model.training.train_master short gru
+# Request only short-side GRU
+uv run python -m trade_ai.model.training.train_master --short_gru
 
-# Train only the common RL policy from existing compatible OOS streams
-uv run python -m trade_ai.model.training.train_master both rl
+# Request only the shared policy
+uv run python -m trade_ai.model.training.train_master --meta_ensemble
 ```
 
 ## Base specialist lifecycle
 
-For each selected direction, `train_master.py` backs up the prior checkpoint
-and sidecar, unloads selected models, and then runs LightGBM followed by GRU.
+The planned `train_master.py` dispatcher will back up selected checkpoints and
+sidecars, unload selected models, and launch one isolated worker per selected
+direction. The current `backgroundTrainingWorker()` is still a placeholder, so
+this orchestration is not active yet. Once connected, `both` is intended to run
+the long and short workers concurrently on disjoint CPU affinity masks when the
+platform supports affinity and at least two CPUs are assigned. Each direction
+worker will run its selected LightGBM stage followed by its selected GRU stage.
+
+The planned `TRADE_AI_BASE_TRAINING_CPUS` setting controls the total logical CPU
+budget across concurrent direction workers. It defaults to all logical CPUs available in the worker's
+current affinity mask. CPU IDs are split into disjoint sets as evenly as
+possible. If the budget is one CPU, or CPU affinity is unavailable, direction
+workers run sequentially. If a configured budget exceeds the available CPU
+count, the worker logs a warning and caps it to the available count. Invalid or
+non-positive values are logged and fall back to the default. Each child applies
+its CPU affinity before importing training libraries, sets OpenMP/MKL/OpenBLAS/
+NumExpr thread limits to its assigned CPU count, configures PyTorch intra-op
+threads to that count, and sets LightGBM's `num_threads` to that count.
+Set these variables in the repository-root `.env` or in the shell/service
+environment that launches the CLI. Shell variables take precedence, and the
+training launcher passes the resolved values to its workers. For a four-CPU
+machine, one explicit configuration is:
+
+```sh
+export TRADE_AI_BASE_TRAINING_CPUS=4
+export TRADE_AI_PPO_CPUS=3
+```
+
 Both trainers use the ticker universe in `model/stock_metadata.py`, load local
 OHLCV CSVs through `training/util.py`, build direction-specific labels, and
 attempt every ticker configured in `STOCK_METADATA`. Tickers with missing or
@@ -176,9 +189,8 @@ selection on the final holdout safe.
 ## Artifacts and loading
 
 `training/util.py:download_missing_stock_data()` downloads missing ticker CSVs
-once at the beginning of every worker run. It uses the chunked downloader in
-the same module, which requests adjacent inclusive 30-calendar-day OpenAlgo
-chunks with up to three attempts.
+when invoked. It uses the chunked downloader in the same module, which requests
+adjacent inclusive 30-calendar-day OpenAlgo chunks with up to three attempts.
 The current default download window ends 2026-07-31; a ticker listed after that
 date, such as JPL, is skipped unless a newer local cache exists. Empty initial
 chunks—including OpenAlgo's “no data available” response—are skipped until the
@@ -203,30 +215,27 @@ action contracts match and the four checkpoint hashes equal the hashes recorded
 in the policy manifest. After a base model changes, the previous policy is
 backed up and will not be used until retrained against those exact base files.
 
+Planned orchestration runs PPO in its own child process only after all selected
+base workers succeed. This stage is not connected to `backgroundTrainingWorker()` yet.
+`TRADE_AI_PPO_CPUS` sets its logical CPU budget and defaults to three CPUs,
+capped to the available affinity mask. A configured value above the available
+count is logged and capped. The PPO child pins its process where supported and
+applies the same native-library and PyTorch thread limits before training.
+RL-only requests use this PPO worker directly with existing OOS data.
+
 ## Launching training
 
-From the repository root, start a run with:
+From the repository root, pass model flags to the launcher. For example:
 
 ```sh
-uv run python -m trade_ai.model.training.train_master both all
+uv run python -m trade_ai.model.training.train_master --all
 ```
 
-Replace `both all` with any valid mindset and component. The launcher prints the
-worker PID, log path, and metadata path. Training continues after the launcher
-returns or its terminal closes.
-
-Follow the latest full run's log:
-
-```sh
-tail -f "$(ls -t logs/train_both_all_*.log | head -n 1)"
-```
-
-Check whether it is still running:
-
-```sh
-ps -p "$(cat logs/train.pid)" -o pid,stat,etime,cmd
-```
-
-If `ps` prints no process, inspect the log's final lines. A LightGBM baseline
-rejection or an RL selection rejection is reported as a completed run with
-skips; exceptions are reported as a failed run.
+In an interactive foreground shell, the launcher opens the multi-option
+selector. It then prints the detached worker PID and log path. Standard output
+and errors go to `logs/FS_<feature-version>LS_<label-version>_<timestamp>/worker.log`.
+The same directory contains `worker.pid` with the detached worker's process ID.
+The launcher sets common native thread-pool and training CPU budget variables to
+the number of CPUs available to it, overriding inherited one-core limits. The
+worker handler is still a placeholder, so model training and downloading do not
+start until stage dispatch is connected.

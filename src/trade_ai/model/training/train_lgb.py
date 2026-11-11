@@ -47,6 +47,29 @@ class PreparedLightGBMData:
     selection_validation: LightGBMPartition
 
 
+def _worker_cpu_count() -> int:
+    """Return the CPU budget assigned to this process for LightGBM training."""
+    # Child workers pass their allocation explicitly so platforms without affinity
+    # APIs can still honor the configured CPU budget.
+    worker_cpu_count = os.environ.get("TRADE_AI_WORKER_CPU_COUNT")
+    if worker_cpu_count is not None:
+        try:
+            return max(1, int(worker_cpu_count))
+        except ValueError:
+            logger.warning(
+                "Invalid TRADE_AI_WORKER_CPU_COUNT=%r; detecting available CPUs.",
+                worker_cpu_count,
+            )
+
+    # Standalone trainer calls use the process affinity mask where supported.
+    if hasattr(os, "sched_getaffinity"):
+        try:
+            return max(1, len(os.sched_getaffinity(0)))
+        except OSError:
+            logger.exception("Could not read CPU affinity for LightGBM.")
+    return max(1, os.cpu_count() or 1)
+
+
 def _walk_forward_plan() -> WalkForwardPlan:
     """Build one date plan from every ticker in the configured universe."""
     all_session_dates: set[pd.Timestamp] = set()
@@ -220,6 +243,8 @@ def train_lightgbm_model(direction: Direction = "long") -> bool:
         "feature_fraction": 0.8,
         "bagging_fraction": 0.8,
         "bagging_freq": 5,
+        # Keep OpenMP training threads within the worker's assigned CPU mask.
+        "num_threads": _worker_cpu_count(),
         "verbose": -1,
     }
 

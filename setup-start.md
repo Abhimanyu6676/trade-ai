@@ -40,9 +40,11 @@ Run commands from the repository root.
    OPENALGO_API_KEY=your-api-key
    OPENALGO_HOST=https://your-openalgo-host
    TRADE_AI_CHAT_ORIGINS=http://localhost:3011,http://127.0.0.1:3011
+   TRADE_AI_BASE_TRAINING_CPUS=4
+   TRADE_AI_PPO_CPUS=3
    ```
 
-   All three settings are required when starting the app. `OPENALGO_HOST` should point to the OpenAlgo endpoint, and `TRADE_AI_CHAT_ORIGINS` is a comma-separated list of allowed frontend origins. Do not commit `.env` or put credential values in tracked files.
+   The first three settings are required when starting the app. The two CPU settings are optional training budgets; base workers default to all available CPUs, while PPO defaults to up to three. `OPENALGO_HOST` should point to the OpenAlgo endpoint, and `TRADE_AI_CHAT_ORIGINS` is a comma-separated list of allowed frontend origins. Do not commit `.env` or put credential values in tracked files.
 
 4. The application loads the repository-root `.env` before startup. Shell variables take precedence. You can also export values explicitly when starting from a different environment:
 
@@ -52,7 +54,7 @@ Run commands from the repository root.
    set +a
    ```
 
-5. The startup validator checks that all settings declared in `APPLICATION_ENVIRONMENT_VARIABLES` are present and nonblank before loading models or starting the server.
+5. `environmentLoader.py` loads optional CPU budgets for the training CLI and validates that all settings declared in `APPLICATION_ENVIRONMENT_VARIABLES` are present and nonblank before loading models or starting the server.
 
 ## Dependencies Guide
 
