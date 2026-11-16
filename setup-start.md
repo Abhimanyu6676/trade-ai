@@ -130,8 +130,9 @@ Detach with `Ctrl+B`, then `D`; reconnect with
 `tmux attach -t trade-ai-training`. In an interactive terminal, the multi-option
 selector opens even when model flags are supplied, with those choices preselected
 for confirmation. In a non-interactive terminal, explicit flags run directly.
-`--all` downloads missing history, trains all four base specialists, then trains
-the shared PPO meta-agent.
+Canceling the selector or confirming without any choices exits without starting
+training. `--all` downloads missing history, trains all four base specialists,
+then trains the shared PPO meta-agent.
 
 Examples of other selections:
 

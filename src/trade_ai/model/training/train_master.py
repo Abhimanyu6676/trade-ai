@@ -10,6 +10,7 @@ from trade_ai.logger import logger
 from trade_ai.model.modelTypes import BASE_MODELS
 from trade_ai.model.training.train_master_helper import (
     TrainingCommand,
+    _literal_string_values,
     log_duration,
     parse_training_args,
     parse_training_command,
@@ -25,6 +26,8 @@ def register_trainer(
     """Register a specialist training function by its model name."""
 
     def decorator(func: Callable[[], bool]) -> Callable[[], bool]:
+        if model_name in MODEL_TRAINERS:
+            raise ValueError(f"Trainer already registered for {model_name}")
         MODEL_TRAINERS[model_name] = func
         return func
 
@@ -65,6 +68,19 @@ def _run_short_gru() -> bool:
 
     train_short_gru(epochs=20)
     return True
+
+
+def _validate_registered_trainers() -> None:
+    """Fail fast at import time if any BASE_MODELS member lacks a trainer."""
+    expected_models = set(_literal_string_values(BASE_MODELS))
+    missing_models = sorted(expected_models - MODEL_TRAINERS.keys())
+    if missing_models:
+        raise RuntimeError(
+            f"Missing registered trainers for BASE_MODELS: {', '.join(missing_models)}"
+        )
+
+
+_validate_registered_trainers()
 
 
 class TrainingRunner:

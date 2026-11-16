@@ -155,10 +155,15 @@ logger instead of creating module-specific loggers. Python's
   chunk afterward rejects the whole download to prevent gaps. Failed downloads
   are not cached, and successful history caches are not automatically refreshed.
 - `training/train_master.py` loads the repository environment, parses model
-  flags with `training/train_master_helper.py`, and runs selected downloads and
-  training stages synchronously in the CLI process. In an interactive terminal,
-  the selector always opens and preselects any explicit flags for confirmation;
-  non-interactive invocations use explicit flags directly. `--all` downloads
+  flags with `training/train_master_helper.py`, stores long and short model
+  selections in separate typed tuples, and runs selected downloads and training
+  stages synchronously in the CLI process. In an interactive terminal, the
+  selector always opens and preselects any explicit flags for confirmation;
+  non-interactive invocations use explicit flags directly. Canceling or
+  confirming an empty selection exits without training. The trainer registry
+  rejects duplicate registrations and is checked for all four base models at
+  CLI initialization. Stage failures are logged; peer specialists continue,
+  and PPO is skipped if any selected base stage fails. `--all` downloads
   missing history, trains all four specialists, then trains PPO.
   It runs independently on the training VPS and does not load the inference
   model manager or back up, unload, or reload model artifacts. Trainer modules

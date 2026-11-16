@@ -47,7 +47,9 @@ for confirmation and can be changed before training starts. In a non-interactive
 terminal, explicit flags run directly because a selector cannot be shown. `--all`
 downloads missing ticker history, trains all four specialists, then trains PPO.
 Use `--download` with model flags to request the download step alongside selected
-training stages.
+training stages. The command stores long and short specialist selections in
+separate typed tuples. Canceling the selector or confirming an empty selection
+exits with a clear message without starting a stage.
 
 Examples:
 
@@ -76,6 +78,10 @@ specialists. PPO runs after selected base models and is skipped if any of those
 base stages fail. The CLI does not create detached processes; use tmux to keep
 the terminal session running after you detach. It does not set CPU affinity or
 thread limits, so LightGBM, PyTorch, and other libraries use their own defaults.
+Each base model must have exactly one registered trainer; duplicate registrations
+and missing model handlers fail during CLI initialization. Stage failures are
+logged and returned as unsuccessful results; stages that return normally log
+their elapsed time and result.
 
 Both trainers use the ticker universe in `model/stock_metadata.py`, load local
 OHLCV CSVs through `training/util.py`, build direction-specific labels, and

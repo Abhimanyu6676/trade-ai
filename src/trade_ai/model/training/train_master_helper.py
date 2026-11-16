@@ -59,19 +59,23 @@ def safe_stage(
     return decorator
 
 
-def log_duration(stage_label: str) -> Callable[[Callable[P, bool]], Callable[P, bool]]:
+def log_duration(
+    stage_label: str, *, include_first_arg: bool = False
+) -> Callable[[Callable[P, bool]], Callable[P, bool]]:
     """Log how long a training or download stage takes to complete."""
 
     def decorator(func: Callable[P, bool]) -> Callable[P, bool]:
         @functools.wraps(func)
         def wrapper(*args: P.args, **kwargs: P.kwargs) -> bool:
-            # Measure only the wrapped stage so the log reports its own runtime.
             start = time.perf_counter()
             result = func(*args, **kwargs)
             elapsed = time.perf_counter() - start
-            logger.info(
-                "%s finished in %.2fs (success=%s).", stage_label, elapsed, result
+            label = (
+                f"{stage_label} ({args[0]})"
+                if include_first_arg and args
+                else stage_label
             )
+            logger.info("%s finished in %.2fs (success=%s).", label, elapsed, result)
             return result
 
         return wrapper
@@ -131,14 +135,12 @@ def _select_options(
     selection = CheckboxPrompt(
         message="Choose model-training options",
         choices=[
-            Choice(option, enabled=True)
-            if option in selected_options
-            else Choice(option)
-            for option in options
+            Choice(option, enabled=option in selected_options) for option in options
         ],
         instruction="(Use space to select, arrows to move, enter to confirm)",
+        raise_keyboard_interrupt=False,
     ).execute()
-    return cast(list[TrainingOption], selection)
+    return cast(list[TrainingOption], selection or [])
 
 
 def parse_training_args(argv: list[str]) -> list[TrainingOption] | None:
