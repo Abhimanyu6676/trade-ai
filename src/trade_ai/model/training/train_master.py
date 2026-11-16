@@ -2,65 +2,21 @@
 
 from __future__ import annotations
 
-import functools
 import sys
-import time
 from collections.abc import Callable, Sequence
-from typing import ParamSpec
 
 from trade_ai.environmentLoader import load_environment
 from trade_ai.logger import logger
 from trade_ai.model.modelTypes import BASE_MODELS
 from trade_ai.model.training.train_master_helper import (
     TrainingCommand,
+    log_duration,
     parse_training_args,
     parse_training_command,
+    safe_stage,
 )
 
-P = ParamSpec("P")
-
 MODEL_TRAINERS: dict[BASE_MODELS, Callable[[], bool]] = {}
-
-
-def safe_stage(
-    error_message: str, *, include_first_arg: bool = False
-) -> Callable[[Callable[P, bool]], Callable[P, bool]]:
-    """Catch exceptions in a training stage, log them, and return False."""
-
-    def decorator(func: Callable[P, bool]) -> Callable[P, bool]:
-        @functools.wraps(func)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> bool:
-            try:
-                return func(*args, **kwargs)
-            except Exception:
-                if include_first_arg and args:
-                    logger.exception(error_message, args[0])
-                else:
-                    logger.exception(error_message)
-                return False
-
-        return wrapper
-
-    return decorator
-
-
-def log_duration(stage_label: str) -> Callable[[Callable[P, bool]], Callable[P, bool]]:
-    """Log how long a training or download stage takes to complete."""
-
-    def decorator(func: Callable[P, bool]) -> Callable[P, bool]:
-        @functools.wraps(func)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> bool:
-            start = time.perf_counter()
-            result = func(*args, **kwargs)
-            elapsed = time.perf_counter() - start
-            logger.info(
-                "%s finished in %.2fs (success=%s).", stage_label, elapsed, result
-            )
-            return result
-
-        return wrapper
-
-    return decorator
 
 
 def register_trainer(

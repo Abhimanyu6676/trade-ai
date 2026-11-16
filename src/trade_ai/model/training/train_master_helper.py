@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import sys
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Literal, cast, get_args
+from typing import Literal, ParamSpec, cast, get_args
 
 from InquirerPy.base.control import Choice
 from InquirerPy.prompts.checkbox import CheckboxPrompt
 
+from trade_ai.logger import logger
 from trade_ai.model.modelTypes import (
     LONG_BASE_MODELS,
     MODEL_NAMES,
@@ -19,6 +22,7 @@ from trade_ai.model.modelTypes import (
 )
 
 TrainingOption = PREDICTION_MODELS | Literal["all", "download"]
+P = ParamSpec("P")
 
 
 @dataclass(frozen=True)
@@ -29,6 +33,50 @@ class TrainingCommand:
     short_models: tuple[SHORT_BASE_MODELS, ...] = ()
     train_meta_agent: bool = False
     download_data: bool = False
+
+
+def safe_stage(
+    error_message: str, *, include_first_arg: bool = False
+) -> Callable[[Callable[P, bool]], Callable[P, bool]]:
+    """Catch exceptions in a training stage, log them, and return False."""
+
+    def decorator(func: Callable[P, bool]) -> Callable[P, bool]:
+        @functools.wraps(func)
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> bool:
+            # Preserve the stage result unless an exception needs conversion to failure.
+            try:
+                return func(*args, **kwargs)
+            except Exception:
+                # Add the first argument when the stage message identifies a model.
+                if include_first_arg and args:
+                    logger.exception(error_message, args[0])
+                else:
+                    logger.exception(error_message)
+                return False
+
+        return wrapper
+
+    return decorator
+
+
+def log_duration(stage_label: str) -> Callable[[Callable[P, bool]], Callable[P, bool]]:
+    """Log how long a training or download stage takes to complete."""
+
+    def decorator(func: Callable[P, bool]) -> Callable[P, bool]:
+        @functools.wraps(func)
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> bool:
+            # Measure only the wrapped stage so the log reports its own runtime.
+            start = time.perf_counter()
+            result = func(*args, **kwargs)
+            elapsed = time.perf_counter() - start
+            logger.info(
+                "%s finished in %.2fs (success=%s).", stage_label, elapsed, result
+            )
+            return result
+
+        return wrapper
+
+    return decorator
 
 
 def _literal_string_values(type_alias: object) -> tuple[str, ...]:
