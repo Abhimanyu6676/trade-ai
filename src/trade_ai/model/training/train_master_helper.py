@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal, cast, get_args
 
 from InquirerPy.base.control import Choice
 from InquirerPy.prompts.checkbox import CheckboxPrompt
 
-from trade_ai.model.modelTypes import BASE_MODELS, MODEL_NAMES, PREDICTION_MODELS
+from trade_ai.model.modelTypes import (
+    LONG_BASE_MODELS,
+    MODEL_NAMES,
+    PREDICTION_MODELS,
+    SHORT_BASE_MODELS,
+)
 
 TrainingOption = PREDICTION_MODELS | Literal["all", "download"]
 
@@ -19,7 +25,8 @@ TrainingOption = PREDICTION_MODELS | Literal["all", "download"]
 class TrainingCommand:
     """Describe which model stages and optional data download to run."""
 
-    base_models: tuple[BASE_MODELS, ...] = ()
+    long_models: tuple[LONG_BASE_MODELS, ...] = ()
+    short_models: tuple[SHORT_BASE_MODELS, ...] = ()
     train_meta_agent: bool = False
     download_data: bool = False
 
@@ -37,6 +44,33 @@ def _literal_string_values(type_alias: object) -> tuple[str, ...]:
 
     # Keep the declared option order while removing duplicate values.
     return tuple(dict.fromkeys(values))
+
+
+def _split_base_models(
+    selected_options: Sequence[TrainingOption],
+) -> tuple[
+    tuple[LONG_BASE_MODELS, ...],
+    tuple[SHORT_BASE_MODELS, ...],
+]:
+    """Separate selected specialist names into direction-specific tuples."""
+    # Filter against each direction's Literal so command fields retain their types.
+    long_models = cast(
+        tuple[LONG_BASE_MODELS, ...],
+        tuple(
+            option
+            for option in selected_options
+            if option in get_args(LONG_BASE_MODELS)
+        ),
+    )
+    short_models = cast(
+        tuple[SHORT_BASE_MODELS, ...],
+        tuple(
+            option
+            for option in selected_options
+            if option in get_args(SHORT_BASE_MODELS)
+        ),
+    )
+    return long_models, short_models
 
 
 def _select_options(
@@ -91,19 +125,19 @@ def parse_training_command(
 
     # The all option intentionally includes the one-time history download.
     if "all" in selected_options:
+        long_models, short_models = _split_base_models(MODEL_NAMES)
         return TrainingCommand(
-            base_models=MODEL_NAMES,
+            long_models=long_models,
+            short_models=short_models,
             train_meta_agent=True,
             download_data=True,
         )
 
-    # Build a typed command from the selected specialist, meta-agent, and download flags.
-    base_models = cast(
-        tuple[BASE_MODELS, ...],
-        tuple(option for option in selected_options if option in MODEL_NAMES),
-    )
+    # Keep long and short specialists in their matching directional command fields.
+    long_models, short_models = _split_base_models(selected_options)
     return TrainingCommand(
-        base_models=base_models,
+        long_models=long_models,
+        short_models=short_models,
         train_meta_agent="meta_ensemble" in selected_options,
         download_data="download" in selected_options,
     )

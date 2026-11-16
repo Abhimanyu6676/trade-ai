@@ -117,7 +117,12 @@ class TrainingRunner:
     @safe_stage("Training run failed.")
     def run(self, command: TrainingCommand) -> bool:
         """Download requested data and execute the selected training stages."""
-        if not command.base_models and not command.train_meta_agent:
+        # Combine directional selections in their established training order.
+        base_models: tuple[BASE_MODELS, ...] = (
+            *command.long_models,
+            *command.short_models,
+        )
+        if not base_models and not command.train_meta_agent:
             # A download-only command reports failure if any ticker could not be fetched.
             return self._download_data(command.download_data)
 
@@ -125,10 +130,10 @@ class TrainingRunner:
         self._download_data(command.download_data)
 
         # Run every requested specialist, then train PPO if its inputs remain valid.
-        base_training_succeeded = self._train_base_models(command.base_models)
+        base_training_succeeded = self._train_base_models(base_models)
         meta_training_succeeded = True
         if command.train_meta_agent:
-            if command.base_models and not base_training_succeeded:
+            if base_models and not base_training_succeeded:
                 logger.warning(
                     "Skipping PPO because at least one selected base model failed."
                 )
