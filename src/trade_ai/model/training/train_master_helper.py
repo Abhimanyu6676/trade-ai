@@ -60,7 +60,7 @@ def _select_options(
 
 
 def parse_training_args(argv: list[str]) -> list[TrainingOption] | None:
-    """Parse explicit training flags or prompt when no flags are given in a TTY."""
+    """Parse training flags and confirm the selection interactively when possible."""
     parser = argparse.ArgumentParser(description="Select model-training stages.")
 
     # Derive flags from the model type aliases to keep the CLI and contracts aligned.
@@ -74,11 +74,11 @@ def parse_training_args(argv: list[str]) -> list[TrainingOption] | None:
         option for option in options if getattr(parsed, option)
     ]
 
-    # Explicit flags work without prompting, including inside detached tmux sessions.
-    if selected_options or not sys.stdin.isatty():
+    # Non-interactive runs cannot show a selector, so use any explicit flags as supplied.
+    if not sys.stdin.isatty():
         return selected_options
 
-    # An empty interactive command opens the selector; cancelling returns no command.
+    # Always show the selector in a TTY; explicit flags are preselected for confirmation.
     return _select_options(selected_options) or None
 
 

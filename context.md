@@ -156,9 +156,10 @@ logger instead of creating module-specific loggers. Python's
   are not cached, and successful history caches are not automatically refreshed.
 - `training/train_master.py` loads the repository environment, parses model
   flags with `training/train_master_helper.py`, and runs selected downloads and
-  training stages synchronously in the CLI process. Explicit flags run without
-  a prompt; an empty interactive invocation opens the selector. `--all`
-  downloads missing history, trains all four specialists, then trains PPO.
+  training stages synchronously in the CLI process. In an interactive terminal,
+  the selector always opens and preselects any explicit flags for confirmation;
+  non-interactive invocations use explicit flags directly. `--all` downloads
+  missing history, trains all four specialists, then trains PPO.
   It runs independently on the training VPS and does not load the inference
   model manager or back up, unload, or reload model artifacts. Trainer modules
   manage their own artifact writes; deploy results to the inference VPS and

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import functools
 import sys
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
+from typing import ParamSpec
 
 from trade_ai.environmentLoader import load_environment
 from trade_ai.logger import logger
@@ -14,10 +17,104 @@ from trade_ai.model.training.train_master_helper import (
     parse_training_command,
 )
 
+P = ParamSpec("P")
+
+MODEL_TRAINERS: dict[BASE_MODELS, Callable[[], bool]] = {}
+
+
+def safe_stage(
+    error_message: str, *, include_first_arg: bool = False
+) -> Callable[[Callable[P, bool]], Callable[P, bool]]:
+    """Catch exceptions in a training stage, log them, and return False."""
+
+    def decorator(func: Callable[P, bool]) -> Callable[P, bool]:
+        @functools.wraps(func)
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> bool:
+            try:
+                return func(*args, **kwargs)
+            except Exception:
+                if include_first_arg and args:
+                    logger.exception(error_message, args[0])
+                else:
+                    logger.exception(error_message)
+                return False
+
+        return wrapper
+
+    return decorator
+
+
+def log_duration(stage_label: str) -> Callable[[Callable[P, bool]], Callable[P, bool]]:
+    """Log how long a training or download stage takes to complete."""
+
+    def decorator(func: Callable[P, bool]) -> Callable[P, bool]:
+        @functools.wraps(func)
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> bool:
+            start = time.perf_counter()
+            result = func(*args, **kwargs)
+            elapsed = time.perf_counter() - start
+            logger.info(
+                "%s finished in %.2fs (success=%s).", stage_label, elapsed, result
+            )
+            return result
+
+        return wrapper
+
+    return decorator
+
+
+def register_trainer(
+    model_name: BASE_MODELS,
+) -> Callable[[Callable[[], bool]], Callable[[], bool]]:
+    """Register a specialist training function by its model name."""
+
+    def decorator(func: Callable[[], bool]) -> Callable[[], bool]:
+        MODEL_TRAINERS[model_name] = func
+        return func
+
+    return decorator
+
+
+@register_trainer("long_lgb")
+def _run_long_lgb() -> bool:
+    from trade_ai.model.training.long.train_long_lgb import train_long_lgb
+
+    if not train_long_lgb():
+        logger.warning("Long LightGBM did not pass its validation gate.")
+        return False
+    return True
+
+
+@register_trainer("long_gru")
+def _run_long_gru() -> bool:
+    from trade_ai.model.training.long.train_long_gru import train_long_gru
+
+    train_long_gru(epochs=20)
+    return True
+
+
+@register_trainer("short_lgb")
+def _run_short_lgb() -> bool:
+    from trade_ai.model.training.short.train_short_lgb import train_short_lgb
+
+    if not train_short_lgb():
+        logger.warning("Short LightGBM did not pass its validation gate.")
+        return False
+    return True
+
+
+@register_trainer("short_gru")
+def _run_short_gru() -> bool:
+    from trade_ai.model.training.short.train_short_gru import train_short_gru
+
+    train_short_gru(epochs=20)
+    return True
+
 
 class TrainingRunner:
     """Run selected training stages in the current process."""
 
+    @safe_stage("Training run failed.")
     def run(self, command: TrainingCommand) -> bool:
         """Download requested data and execute the selected training stages."""
         if not command.base_models and not command.train_meta_agent:
@@ -27,25 +124,22 @@ class TrainingRunner:
         # Download before training imports; partial ticker failures do not stop the run.
         self._download_data(command.download_data)
 
-        try:
-            # Run every requested specialist, then train PPO if its inputs remain valid.
-            base_training_succeeded = self._train_base_models(command.base_models)
-            meta_training_succeeded = True
-            if command.train_meta_agent:
-                if command.base_models and not base_training_succeeded:
-                    logger.warning(
-                        "Skipping PPO because at least one selected base model failed."
-                    )
-                    meta_training_succeeded = False
-                else:
-                    meta_training_succeeded = self._train_meta_agent()
+        # Run every requested specialist, then train PPO if its inputs remain valid.
+        base_training_succeeded = self._train_base_models(command.base_models)
+        meta_training_succeeded = True
+        if command.train_meta_agent:
+            if command.base_models and not base_training_succeeded:
+                logger.warning(
+                    "Skipping PPO because at least one selected base model failed."
+                )
+                meta_training_succeeded = False
+            else:
+                meta_training_succeeded = self._train_meta_agent()
 
-            return base_training_succeeded and meta_training_succeeded
-        except Exception:
-            logger.exception("Training run failed.")
-            return False
+        return base_training_succeeded and meta_training_succeeded
 
     @staticmethod
+    @log_duration("Data download")
     def _download_data(requested: bool) -> bool:
         """Download missing ticker history when the command requests it."""
         if not requested:
@@ -77,52 +171,31 @@ class TrainingRunner:
         return succeeded
 
     @staticmethod
+    @safe_stage("Training failed for %s.", include_first_arg=True)
+    @log_duration("Specialist training")
     def _train_base_model(model_name: BASE_MODELS) -> bool:
         """Train one direction/family specialist and report whether it saved."""
-        try:
-            # Import only the selected trainer so unrelated model libraries stay unloaded.
-            if model_name == "long_lgb":
-                from trade_ai.model.training.long.train_long_lgb import train_long_lgb
-
-                saved = train_long_lgb()
-                if not saved:
-                    logger.warning("Long LightGBM did not pass its validation gate.")
-                    return False
-            elif model_name == "long_gru":
-                from trade_ai.model.training.long.train_long_gru import train_long_gru
-
-                train_long_gru(epochs=20)
-            elif model_name == "short_lgb":
-                from trade_ai.model.training.short.train_short_lgb import train_short_lgb
-
-                saved = train_short_lgb()
-                if not saved:
-                    logger.warning("Short LightGBM did not pass its validation gate.")
-                    return False
-            else:
-                from trade_ai.model.training.short.train_short_gru import train_short_gru
-
-                train_short_gru(epochs=20)
-
-            logger.info("Completed training for %s.", model_name)
-            return True
-        except Exception:
-            logger.exception("Training failed for %s.", model_name)
+        trainer = MODEL_TRAINERS.get(model_name)
+        if trainer is None:
+            logger.error("No trainer registered for model: %s", model_name)
             return False
 
+        succeeded = trainer()
+        if succeeded:
+            logger.info("Completed training for %s.", model_name)
+        return succeeded
+
+    @safe_stage("PPO training failed.")
+    @log_duration("PPO meta-agent training")
     def _train_meta_agent(self) -> bool:
         """Train the shared PPO policy using current specialist predictions."""
-        try:
-            # Import the PPO stack only when its training stage is selected.
-            from trade_ai.model.training.train_rl import train_meta_agent
+        # Import the PPO stack only when its training stage is selected.
+        from trade_ai.model.training.train_rl import train_meta_agent
 
-            trained = train_meta_agent()
-            if not trained:
-                logger.warning("PPO did not pass its policy-selection baseline.")
-            return trained
-        except Exception:
-            logger.exception("PPO training failed.")
-            return False
+        trained = train_meta_agent()
+        if not trained:
+            logger.warning("PPO did not pass its policy-selection baseline.")
+        return trained
 
 
 def main(argv: Sequence[str] | None = None) -> int:

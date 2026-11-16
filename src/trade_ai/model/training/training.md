@@ -41,10 +41,12 @@ PPO artifacts must all be retrained before prediction resumes.
 
 `train_master_helper.py` supports these model and download flags:
 `--long_lgb`, `--long_gru`, `--short_lgb`, `--short_gru`, `--meta_ensemble`,
-`--download`, and `--all`. Explicit flags run directly. With no flags in an
-interactive terminal, the CLI opens a multi-option selector. `--all` downloads
-missing ticker history, trains all four specialists, then trains PPO. Use
-`--download` with model flags to request the download step alongside selected
+`--download`, and `--all`. In an interactive terminal, the CLI always opens a
+multi-option selector; any flags supplied on the command line are preselected
+for confirmation and can be changed before training starts. In a non-interactive
+terminal, explicit flags run directly because a selector cannot be shown. `--all`
+downloads missing ticker history, trains all four specialists, then trains PPO.
+Use `--download` with model flags to request the download step alongside selected
 training stages.
 
 Examples:
@@ -204,7 +206,8 @@ tmux new -s trade-ai-training
 uv run python -m trade_ai.model.training.train_master --all
 ```
 
-With explicit flags, training starts directly and stays attached to the tmux
-pane. Detach with `Ctrl+B`, then `D`; reconnect with
-`tmux attach -t trade-ai-training`. Omit flags in an interactive terminal to
-open the option selector. Stop training with `Ctrl+C` in the tmux pane.
+In an interactive terminal, the selector opens even when flags are supplied;
+those choices start preselected for confirmation. In a non-interactive terminal,
+explicit flags run directly. Training stays attached to the tmux pane. Detach
+with `Ctrl+B`, then `D`; reconnect with `tmux attach -t trade-ai-training`.
+Stop training with `Ctrl+C` in the tmux pane.
