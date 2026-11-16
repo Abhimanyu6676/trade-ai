@@ -73,11 +73,13 @@ artifact writes and validation. This command is intended to run independently
 on the training VPS; deploy its resulting artifacts to the inference VPS and
 restart or reload that service separately.
 
-If a selected specialist fails, the runner still attempts the other selected
-specialists. PPO runs after selected base models and is skipped if any of those
-base stages fail. The CLI does not create detached processes; use tmux to keep
-the terminal session running after you detach. It does not set CPU affinity or
-thread limits, so LightGBM, PyTorch, and other libraries use their own defaults.
+The runner executes selected long specialists before selected short specialists,
+and runs LightGBM before GRU within each direction. If a selected specialist
+fails, the runner still attempts the other selected specialists. PPO runs after
+selected base models and is skipped if any of those base stages fail. The CLI
+does not create detached processes; use tmux to keep the terminal session running
+after you detach. It does not set CPU affinity or thread limits, so LightGBM,
+PyTorch, and other libraries use their own defaults.
 Each base model must have exactly one registered trainer; duplicate registrations
 and missing model handlers fail during CLI initialization. Stage failures are
 logged and returned as unsuccessful results; stages that return normally log

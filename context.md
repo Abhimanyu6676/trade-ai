@@ -162,9 +162,11 @@ logger instead of creating module-specific loggers. Python's
   non-interactive invocations use explicit flags directly. Canceling or
   confirming an empty selection exits without training. The trainer registry
   rejects duplicate registrations and is checked for all four base models at
-  CLI initialization. Stage failures are logged; peer specialists continue,
-  and PPO is skipped if any selected base stage fails. `--all` downloads
-  missing history, trains all four specialists, then trains PPO.
+  CLI initialization. Selected long specialists run before short specialists;
+  LightGBM runs before GRU within each direction. Stage failures are logged;
+  peer specialists continue, and PPO is skipped if any selected base stage fails.
+  `--all` downloads missing history, trains all four specialists, then trains
+  PPO.
   It runs independently on the training VPS and does not load the inference
   model manager or back up, unload, or reload model artifacts. Trainer modules
   manage their own artifact writes; deploy results to the inference VPS and

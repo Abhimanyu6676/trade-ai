@@ -19,6 +19,12 @@ from trade_ai.model.training.train_master_helper import (
 
 MODEL_TRAINERS: dict[BASE_MODELS, Callable[[], bool]] = {}
 
+# Enforce LightGBM before GRU within each directional group.
+FAMILY_PRIORITY: dict[str, int] = {
+    "lgb": 0,
+    "gru": 1,
+}
+
 
 def register_trainer(
     model_name: BASE_MODELS,
@@ -83,29 +89,38 @@ def _validate_registered_trainers() -> None:
 _validate_registered_trainers()
 
 
+def _order_group_models(models: Sequence[BASE_MODELS]) -> tuple[BASE_MODELS, ...]:
+    """Order a directional group so LightGBM runs before GRU."""
+    return tuple(
+        sorted(
+            models,
+            key=lambda name: FAMILY_PRIORITY.get(name.rsplit("_", maxsplit=1)[-1], 99),
+        )
+    )
+
+
 class TrainingRunner:
     """Run selected training stages in the current process."""
 
     @safe_stage("Training run failed.")
     def run(self, command: TrainingCommand) -> bool:
         """Download requested data and execute the selected training stages."""
-        # Combine directional selections in their established training order.
-        base_models: tuple[BASE_MODELS, ...] = (
-            *command.long_models,
-            *command.short_models,
-        )
-        if not base_models and not command.train_meta_agent:
+        has_base_models = bool(command.long_models or command.short_models)
+        if not has_base_models and not command.train_meta_agent:
             # A download-only command reports failure if any ticker could not be fetched.
             return self._download_data(command.download_data)
 
         # Download before training imports; partial ticker failures do not stop the run.
         self._download_data(command.download_data)
 
-        # Run every requested specialist, then train PPO if its inputs remain valid.
-        base_training_succeeded = self._train_base_models(base_models)
+        # Run long group first (lgb -> gru), then short group (lgb -> gru).
+        long_succeeded = self._train_direction_group("Long", command.long_models)
+        short_succeeded = self._train_direction_group("Short", command.short_models)
+        base_training_succeeded = long_succeeded and short_succeeded
+
         meta_training_succeeded = True
         if command.train_meta_agent:
-            if base_models and not base_training_succeeded:
+            if has_base_models and not base_training_succeeded:
                 logger.warning(
                     "Skipping PPO because at least one selected base model failed."
                 )
@@ -135,6 +150,22 @@ class TrainingRunner:
             ", ".join(failed_tickers),
         )
         return False
+
+    def _train_direction_group(
+        self, direction_label: str, models: Sequence[BASE_MODELS]
+    ) -> bool:
+        """Run a directional group (Long or Short) ordered as LightGBM then GRU."""
+        ordered_models = _order_group_models(models)
+        if not ordered_models:
+            return True
+
+        logger.info(
+            "Starting %s group batch: %s",
+            direction_label,
+            ", ".join(ordered_models),
+        )
+
+        return self._train_base_models(ordered_models)
 
     def _train_base_models(self, model_names: tuple[BASE_MODELS, ...]) -> bool:
         """Run each selected specialist and retain failures without skipping peers."""
