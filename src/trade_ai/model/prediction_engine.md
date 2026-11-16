@@ -14,7 +14,7 @@ size and entry bracket width. It does not place trades.
   schema-compatible PPO checkpoint. A specialist-only request requires only its
   selected compatible base checkpoint and does not invoke PPO.
 - `GRUTradingBrain` is defined in `models.py`: two GRU layers, hidden size 64, and a three-class output layer.
-- The manager also owns unloading, timestamped backups, in-memory instance access, and checkpoint reloads. Training orchestration requests those operations through the manager.
+- The manager exposes unloading, timestamped backup, in-memory access, and checkpoint reload operations for the serving process. The `train_master.py` CLI runs on the training host and does not call the manager; deploy new artifacts to the serving host separately.
 
 ## Inference flow
 
@@ -65,7 +65,7 @@ not apply.
 - Confidence is a specialist probability, not a calibrated guarantee.
 - If the newest session lacks enough valid same-date GRU rows, GRU specialist
   and meta-ensemble requests return an insufficient-data error.
-- `prediction_engine.py` does not change model state. `train_master.py` coordinates backup, unload, training, and reload through `models.py`.
+- `prediction_engine.py` does not change model state. `train_master.py` runs on the training host and does not initialize or manage the inference model manager; deploy artifacts to the inference host separately.
 
 
 ## Pro-Tip for Maximum Speed (Optional) TODO - do not remove this until its applied

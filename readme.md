@@ -47,12 +47,15 @@ uv sync
 uv run python src/trade_ai/app.py
 ```
 
-The full training command trains all four base specialists and the common
-meta-agent:
+Run all four base specialists and the common meta-agent in a tmux session:
 
 ```sh
-uv run python -m trade_ai.model.training.train_master both all
+tmux new -s trade-ai-training
+uv run python -m trade_ai.model.training.train_master --all
 ```
+
+Detach with `Ctrl+B`, then `D`; see [setup-start.md](setup-start.md) for
+training selections and reconnect instructions.
 
 ## Project Structure
 
@@ -80,7 +83,7 @@ trade-ai/
     │       ├── train_lgb.py          # Shared directional LightGBM trainer
     │       ├── train_rl.py           # Unified PPO training
     │       ├── trading_env.py        # Historical PPO environment
-    │       ├── train_master.py       # Direction/component CLI orchestration
+    │       ├── train_master.py       # Synchronous training CLI
     │       └── training.md           # Training lifecycle and commands
     ├── indicator/                   # Technical indicator implementations
     ├── server/                      # FastAPI routes and API guidebook

@@ -41,21 +41,11 @@ PPO artifacts must all be retrained before prediction resumes.
 
 `train_master_helper.py` supports these model and download flags:
 `--long_lgb`, `--long_gru`, `--short_lgb`, `--short_gru`, `--meta_ensemble`,
-`--download`, and `--all`. In a foreground interactive invocation,
-`parse_training_args()` shows the multi-option selector and returns the selected
-flags. A detached invocation includes `--worker`; the parser then returns its
-flags directly without displaying the selector.
-
-`startInBackground()` launches the same `train_master` module with every
-selected flag plus `--worker`, using the current Python interpreter and a
-detached session. The child converts the parsed flags to `TRAINING_COMMAND` and
-calls `backgroundTrainingWorker()`. That handler is currently a placeholder;
-dispatching download and model-training stages remains pending.
-
-`rl` always trains the one unified policy against all four current specialists,
-even when the first selector is only one side. A long-only or short-only `all`
-run therefore requires compatible OOS streams for the opposite side before the
-common policy can train.
+`--download`, and `--all`. Explicit flags run directly. With no flags in an
+interactive terminal, the CLI opens a multi-option selector. `--all` downloads
+missing ticker history, trains all four specialists, then trains PPO. Use
+`--download` with model flags to request the download step alongside selected
+training stages.
 
 Examples:
 
@@ -70,35 +60,20 @@ uv run python -m trade_ai.model.training.train_master --short_gru
 uv run python -m trade_ai.model.training.train_master --meta_ensemble
 ```
 
-## Base specialist lifecycle
+## Training execution
 
-The planned `train_master.py` dispatcher will back up selected checkpoints and
-sidecars, unload selected models, and launch one isolated worker per selected
-direction. The current `backgroundTrainingWorker()` is still a placeholder, so
-this orchestration is not active yet. Once connected, `both` is intended to run
-the long and short workers concurrently on disjoint CPU affinity masks when the
-platform supports affinity and at least two CPUs are assigned. Each direction
-worker will run its selected LightGBM stage followed by its selected GRU stage.
+`train_master.py` runs every selected stage synchronously in the current
+process. It does not initialize the inference model manager, back up or unload
+loaded models, or reload artifacts afterward. Trainer modules manage their own
+artifact writes and validation. This command is intended to run independently
+on the training VPS; deploy its resulting artifacts to the inference VPS and
+restart or reload that service separately.
 
-The planned `TRADE_AI_BASE_TRAINING_CPUS` setting controls the total logical CPU
-budget across concurrent direction workers. It defaults to all logical CPUs available in the worker's
-current affinity mask. CPU IDs are split into disjoint sets as evenly as
-possible. If the budget is one CPU, or CPU affinity is unavailable, direction
-workers run sequentially. If a configured budget exceeds the available CPU
-count, the worker logs a warning and caps it to the available count. Invalid or
-non-positive values are logged and fall back to the default. Each child applies
-its CPU affinity before importing training libraries, sets OpenMP/MKL/OpenBLAS/
-NumExpr thread limits to its assigned CPU count, configures PyTorch intra-op
-threads to that count, and sets LightGBM's `num_threads` to that count.
-Set these variables in the repository-root `.env` or in the shell/service
-environment that launches the CLI. Shell variables take precedence, and the
-training launcher passes the resolved values to its workers. For a four-CPU
-machine, one explicit configuration is:
-
-```sh
-export TRADE_AI_BASE_TRAINING_CPUS=4
-export TRADE_AI_PPO_CPUS=3
-```
+If a selected specialist fails, the runner still attempts the other selected
+specialists. PPO runs after selected base models and is skipped if any of those
+base stages fail. The CLI does not create detached processes; use tmux to keep
+the terminal session running after you detach. It does not set CPU affinity or
+thread limits, so LightGBM, PyTorch, and other libraries use their own defaults.
 
 Both trainers use the ticker universe in `model/stock_metadata.py`, load local
 OHLCV CSVs through `training/util.py`, build direction-specific labels, and
@@ -212,30 +187,24 @@ Artifacts are stored under `src/trade_ai/model/.run_cache/`:
 The model manager validates trading, feature, label, direction, and ordered
 input schemas for every base model. It loads PPO only when the observation and
 action contracts match and the four checkpoint hashes equal the hashes recorded
-in the policy manifest. After a base model changes, the previous policy is
-backed up and will not be used until retrained against those exact base files.
+in the policy manifest. After a base model changes, the existing PPO policy
+will not load until PPO is retrained against those exact base files. The
+training CLI does not back up the previous policy.
 
-Planned orchestration runs PPO in its own child process only after all selected
-base workers succeed. This stage is not connected to `backgroundTrainingWorker()` yet.
-`TRADE_AI_PPO_CPUS` sets its logical CPU budget and defaults to three CPUs,
-capped to the available affinity mask. A configured value above the available
-count is logged and capped. The PPO child pins its process where supported and
-applies the same native-library and PyTorch thread limits before training.
-RL-only requests use this PPO worker directly with existing OOS data.
+When `--meta_ensemble` is selected, PPO trains in the same process after
+selected base stages succeed. A PPO-only request uses current OOS predictions
+from all four specialists.
 
 ## Launching training
 
-From the repository root, pass model flags to the launcher. For example:
+From the repository root, start a tmux session and run the selected command:
 
 ```sh
+tmux new -s trade-ai-training
 uv run python -m trade_ai.model.training.train_master --all
 ```
 
-In an interactive foreground shell, the launcher opens the multi-option
-selector. It then prints the detached worker PID and log path. Standard output
-and errors go to `logs/FS_<feature-version>LS_<label-version>_<timestamp>/worker.log`.
-The same directory contains `worker.pid` with the detached worker's process ID.
-The launcher sets common native thread-pool and training CPU budget variables to
-the number of CPUs available to it, overriding inherited one-core limits. The
-worker handler is still a placeholder, so model training and downloading do not
-start until stage dispatch is connected.
+With explicit flags, training starts directly and stays attached to the tmux
+pane. Detach with `Ctrl+B`, then `D`; reconnect with
+`tmux attach -t trade-ai-training`. Omit flags in an interactive terminal to
+open the option selector. Stop training with `Ctrl+C` in the tmux pane.

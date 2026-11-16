@@ -28,9 +28,6 @@ TRAINING_MODULE = "trade_ai.model.training.train_master"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 LOGS_DIRECTORY = REPOSITORY_ROOT / "logs"
 PID_FILE = LOGS_DIRECTORY / "train.pid"
-BASE_CPU_BUDGET_ENV = "TRADE_AI_BASE_TRAINING_CPUS"
-PPO_CPU_BUDGET_ENV = "TRADE_AI_PPO_CPUS"
-WORKER_CPU_IDS_ARG = "--_cpu-ids"
 
 
 def _selected_base_models(
@@ -44,101 +41,6 @@ def _selected_base_models(
         for family in families
         if family in ("lgb", "gru")
     )  # type: ignore[return-value]
-
-
-def _available_cpu_ids() -> list[int]:
-    """Return logical CPU IDs available to this process, respecting its cpuset."""
-    # Prefer the process affinity mask because containers and schedulers may
-    # expose fewer CPUs than the host reports through os.cpu_count().
-    if hasattr(os, "sched_getaffinity"):
-        try:
-            cpu_ids = sorted(os.sched_getaffinity(0))
-            if cpu_ids:
-                return cpu_ids
-        except OSError:
-            logger.exception("Could not read the current CPU affinity mask.")
-
-    # Fall back to the portable logical CPU count when affinity is unavailable.
-    return list(range(max(1, os.cpu_count() or 1)))
-
-
-def _resolve_cpu_budget(env_name: str, default: int, available_count: int) -> int:
-    """Resolve a positive environment CPU budget and clamp it to available CPUs."""
-    raw_value = os.environ.get(env_name)
-    requested = default
-
-    # Parse optional user configuration while preserving a safe machine-based default.
-    if raw_value is not None:
-        try:
-            requested = int(raw_value)
-        except ValueError:
-            logger.warning(
-                "%s=%r is not an integer; using the default of %d CPUs.",
-                env_name,
-                raw_value,
-                default,
-            )
-            requested = default
-
-    # Reject zero and negative values rather than creating an empty affinity set.
-    if requested < 1:
-        logger.warning(
-            "%s=%d must be positive; using the default of %d CPUs.",
-            env_name,
-            requested,
-            default,
-        )
-        requested = default
-
-    # A configured budget may exceed this machine or container's available CPUs.
-    if requested > available_count:
-        logger.warning(
-            "%s requests %d CPUs but only %d are available; using %d.",
-            env_name,
-            requested,
-            available_count,
-            available_count,
-        )
-        return available_count
-    return requested
-
-
-def _configure_worker_cpu(cpu_ids: list[int]) -> int:
-    """Pin a model worker and limit native thread pools to its CPU allocation."""
-    if not cpu_ids:
-        raise ValueError("CPU worker allocation cannot be empty")
-
-    # Apply Linux affinity before importing numerical and ML libraries.
-    if hasattr(os, "sched_setaffinity"):
-        os.sched_setaffinity(0, set(cpu_ids))
-        logger.info("Worker PID %d pinned to logical CPUs %s.", os.getpid(), cpu_ids)
-    else:
-        logger.warning(
-            "CPU affinity is unavailable on this platform; limiting native thread "
-            "pools to %d CPUs without pinning.",
-            len(cpu_ids),
-        )
-
-    # Configure OpenMP and common numerical backends before their imports.
-    cpu_count = len(cpu_ids)
-    for variable in (
-        "OMP_NUM_THREADS",
-        "MKL_NUM_THREADS",
-        "OPENBLAS_NUM_THREADS",
-        "NUMEXPR_NUM_THREADS",
-    ):
-        os.environ[variable] = str(cpu_count)
-    os.environ["TRADE_AI_WORKER_CPU_COUNT"] = str(cpu_count)
-    return cpu_count
-
-
-def _configure_torch_threads(cpu_count: int) -> None:
-    """Set PyTorch CPU intra-op parallelism to the worker's CPU allocation."""
-    # Import Torch only after worker affinity and native thread environment are set.
-    import torch
-
-    torch.set_num_threads(cpu_count)
-    logger.info("Configured PyTorch intra-op threads to %d.", cpu_count)
 
 
 def _run_direction_worker(
@@ -172,8 +74,6 @@ def _run_direction_worker(
     # Train GRU even if this direction's LightGBM stage failed.
     if component in ("gru", "all"):
         try:
-            cpu_count = len(_available_cpu_ids())
-            _configure_torch_threads(cpu_count)
             if direction == "long":
                 from .long.train_long_gru import train_long_gru
 
@@ -193,9 +93,6 @@ def _run_direction_worker(
 def _run_ppo_worker() -> bool:
     """Train PPO in its own process after successful base-model workers."""
     try:
-        # Apply the assigned CPU count before Stable-Baselines3 imports Torch.
-        cpu_count = len(_available_cpu_ids())
-        _configure_torch_threads(cpu_count)
         from .train_rl import train_meta_agent
 
         trained = train_meta_agent()
@@ -213,48 +110,13 @@ def _run_ppo_worker() -> bool:
 def _spawn_direction_workers(
     directions: tuple[Literal["long", "short"], ...],
     component: TrainingComponent,
-    cpu_ids: list[int],
-    cpu_budget: int,
 ) -> bool:
-    """Run direction workers concurrently on disjoint CPU sets when possible."""
-    worker_cpu_ids = cpu_ids[:cpu_budget]
-    affinity_supported = hasattr(os, "sched_setaffinity") and hasattr(
-        os, "sched_getaffinity"
-    )
-    run_sequentially = len(directions) > 1 and (
-        cpu_budget < 2 or not affinity_supported
-    )
-
-    # Split the effective base budget into non-overlapping, near-equal masks.
-    allocations: dict[Literal["long", "short"], list[int]] = {}
-    if len(directions) == 1:
-        allocations[directions[0]] = worker_cpu_ids
-    elif not run_sequentially:
-        split_at = cpu_budget // 2
-        allocations[directions[0]] = worker_cpu_ids[:split_at]
-        allocations[directions[1]] = worker_cpu_ids[split_at:]
-        logger.info(
-            "Base CPU budget=%d split between directions: %s=%s, %s=%s.",
-            cpu_budget,
-            directions[0],
-            allocations[directions[0]],
-            directions[1],
-            allocations[directions[1]],
-        )
-    else:
-        logger.warning(
-            "Cannot run both direction workers on disjoint CPU sets with a "
-            "%d-CPU budget or without affinity support; running them sequentially.",
-            cpu_budget,
-        )
-        allocations = {direction: worker_cpu_ids for direction in directions}
-
+    """Run direction workers concurrently using each library's default settings."""
     succeeded = True
     processes: list[tuple[Literal["long", "short"], subprocess.Popen]] = []
 
-    # Launch each direction as an isolated Python process with its CPU mask.
+    # Launch one isolated Python process for each selected direction.
     for direction in directions:
-        assigned_ids = allocations[direction]
         command = [
             sys.executable,
             "-u",
@@ -263,8 +125,6 @@ def _spawn_direction_workers(
             "--_direction-worker",
             direction,
             component,
-            WORKER_CPU_IDS_ARG,
-            ",".join(str(cpu_id) for cpu_id in assigned_ids),
         ]
         try:
             process = subprocess.Popen(
@@ -281,24 +141,11 @@ def _spawn_direction_workers(
             continue
 
         logger.info(
-            "Started %s base-model worker PID %d on CPUs %s.",
+            "Started %s base-model worker PID %d.",
             direction,
             process.pid,
-            assigned_ids,
         )
-        if run_sequentially:
-            # Wait before launching the next direction when masks cannot be disjoint.
-            return_code = process.wait()
-            if return_code != 0:
-                succeeded = False
-                logger.error(
-                    "%s base-model worker PID %d failed with exit code %d.",
-                    direction,
-                    process.pid,
-                    return_code,
-                )
-        else:
-            processes.append((direction, process))
+        processes.append((direction, process))
 
     # Join all launched direction workers and retain failures without cancelling peers.
     for direction, process in processes:
@@ -320,17 +167,14 @@ def _spawn_direction_workers(
     return succeeded
 
 
-def _spawn_ppo_worker(cpu_ids: list[int], cpu_budget: int) -> bool:
-    """Run PPO as a child process pinned to its configured CPU allocation."""
-    assigned_ids = cpu_ids[:cpu_budget]
+def _spawn_ppo_worker() -> bool:
+    """Run PPO as a child process with the machine's default CPU settings."""
     command = [
         sys.executable,
         "-u",
         "-m",
         TRAINING_MODULE,
         "--_ppo-worker",
-        WORKER_CPU_IDS_ARG,
-        ",".join(str(cpu_id) for cpu_id in assigned_ids),
     ]
     try:
         # The child inherits this run's log descriptors and writes its own stage details.
@@ -344,7 +188,7 @@ def _spawn_ppo_worker(cpu_ids: list[int], cpu_budget: int) -> bool:
         logger.exception("Could not start the PPO worker.")
         return False
 
-    logger.info("Started PPO worker PID %d on CPUs %s.", process.pid, assigned_ids)
+    logger.info("Started PPO worker PID %d.", process.pid)
     return_code = process.wait()
     if return_code != 0:
         logger.error(
@@ -387,22 +231,11 @@ def run_training(
 
     training_succeeded = False
     try:
-        # Resolve CPU masks once for this run, respecting container affinity.
-        cpu_ids = _available_cpu_ids()
-        base_cpu_budget = _resolve_cpu_budget(
-            BASE_CPU_BUDGET_ENV, len(cpu_ids), len(cpu_ids)
-        )
-        logger.info(
-            "Available logical CPUs=%s; base training CPU budget=%d.",
-            cpu_ids,
-            base_cpu_budget,
-        )
-
         # Direction workers own their separate checkpoints and continue independently.
         base_training_succeeded = True
         if selected_models:
             base_training_succeeded = _spawn_direction_workers(
-                directions, component, cpu_ids, base_cpu_budget
+                directions, component
             )
 
         rl_trained = True
@@ -414,15 +247,7 @@ def run_training(
                     "training process failed."
                 )
             else:
-                ppo_default = min(3, len(cpu_ids))
-                ppo_cpu_budget = _resolve_cpu_budget(
-                    PPO_CPU_BUDGET_ENV, ppo_default, len(cpu_ids)
-                )
-                logger.info(
-                    "Starting unified PPO meta-agent training with %d CPUs.",
-                    ppo_cpu_budget,
-                )
-                rl_trained = _spawn_ppo_worker(cpu_ids, ppo_cpu_budget)
+                rl_trained = _spawn_ppo_worker()
 
         # Even on a stage failure, the parent has joined all workers and can reload
         # checkpoints that completed successfully before returning a failed status.
@@ -478,7 +303,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--_direction-worker", action="store_true", help=argparse.SUPPRESS
     )
     parser.add_argument("--_ppo-worker", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument(WORKER_CPU_IDS_ARG, help=argparse.SUPPRESS)
     return parser
 
 
@@ -634,7 +458,7 @@ def _launch_training(
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Resolve selectors, confirm interactive requests, then always detach work."""
-    # Load optional CPU budgets from .env before resolving or spawning workers.
+    # Load repository settings before resolving or spawning workers.
     from trade_ai.environmentLoader import load_environment
 
     load_environment()
@@ -642,7 +466,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    # Internal child modes configure affinity before importing model libraries.
+    # Internal child modes run the selected training stage with library defaults.
     if args._direction_worker or args._ppo_worker:
         if (
             args._worker
@@ -650,17 +474,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             or args._direction_worker == args._ppo_worker
         ):
             parser.error("internal training worker options cannot be combined")
-        if not args._cpu_ids:
-            parser.error("internal training workers require --_cpu-ids")
-        try:
-            cpu_ids = sorted({int(cpu_id) for cpu_id in args._cpu_ids.split(",")})
-            if not cpu_ids or any(cpu_id < 0 for cpu_id in cpu_ids):
-                raise ValueError("CPU IDs must be a non-empty list of non-negative IDs")
-            _configure_worker_cpu(cpu_ids)
-        except OSError, ValueError:
-            logger.exception("Could not configure the training worker CPU allocation.")
-            return 1
-
         if args._direction_worker:
             if args.mindset not in ("long", "short") or args.component not in (
                 "lgb",

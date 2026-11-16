@@ -154,19 +154,17 @@ logger instead of creating module-specific loggers. Python's
   initial no-data chunks are skipped until history begins; any empty/no-data
   chunk afterward rejects the whole download to prevent gaps. Failed downloads
   are not cached, and successful history caches are not automatically refreshed.
-- `training/train_master.py` passes CLI arguments to
-  `training/train_master_helper.py:parse_training_args()`. A foreground
-  interactive invocation can select model flags; a detached `--worker`
-  invocation parses those flags without prompting. The foreground launcher
-  starts the same module in a detached process with the selected flags and
-  `--worker`; its stdout and stderr are saved to
-  `logs/FS_<feature-version>LS_<label-version>_<timestamp>/worker.log`, and its
-  PID is saved beside it in `worker.pid`. The child receives CPU thread and
-  training budget settings for every CPU available to the launcher. It converts
-  the flags to `TRAINING_COMMAND` and calls
-  `backgroundTrainingWorker()`. Model-stage dispatch is still pending in that
-  worker handler. See `model/training/training.md` for the training methodology
-  and command details.
+- `training/train_master.py` loads the repository environment, parses model
+  flags with `training/train_master_helper.py`, and runs selected downloads and
+  training stages synchronously in the CLI process. Explicit flags run without
+  a prompt; an empty interactive invocation opens the selector. `--all`
+  downloads missing history, trains all four specialists, then trains PPO.
+  It runs independently on the training VPS and does not load the inference
+  model manager or back up, unload, or reload model artifacts. Trainer modules
+  manage their own artifact writes; deploy results to the inference VPS and
+  restart or reload that service separately. The CLI leaves CPU affinity and
+  thread counts at library defaults; use tmux to keep the terminal session
+  alive while detached. See `model/training/training.md` for command details.
 - `training/util.py` provides chunked downloads, missing-cache prefetching,
   CSV-only loading, shared ticker feature/label preparation, chronological row
   bounds, and PPO market metadata for training data.
@@ -263,12 +261,11 @@ logger instead of creating module-specific loggers. Python's
   (`libgomp1` on Debian/Ubuntu) are required.
 - `environmentLoader.py` requires `OPENALGO_API_KEY`, `OPENALGO_HOST`, and
   `TRADE_AI_CHAT_ORIGINS`, loading the repository-root `.env` while preserving
-  existing process environment values. It also loads optional
-  `TRADE_AI_BASE_TRAINING_CPUS` and `TRADE_AI_PPO_CPUS` budgets for the training
-  CLI. Never store credentials in tracked files or logs.
+  existing process environment values. Never store credentials in tracked files
+  or logs.
 - Install dependencies with `uv sync`; start the app with
   `uv run python src/trade_ai/app.py`.
-- Train using `uv run python -m trade_ai.model.training.train_master [long|short|both] [gru|lgb|rl|all]`.
-- Download missing training data only with `uv run python -m trade_ai.model.training.train_master --download-only`.
+- Train using `uv run python -m trade_ai.model.training.train_master --all` or another model flag.
+- Download missing training data with `uv run python -m trade_ai.model.training.train_master --download`.
 - No test command is configured in `pyproject.toml`; do not add or run tests
   unless requested.

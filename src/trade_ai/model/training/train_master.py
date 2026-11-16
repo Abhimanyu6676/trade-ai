@@ -1,159 +1,145 @@
-"""Launch detached training runs and coordinate base models with PPO."""
+"""Run selected model-training stages in the current process."""
 
 from __future__ import annotations
 
-import os  # Used to inherit the environment and determine the available CPU set.
-import subprocess  # Used to launch the selected command as a detached child process.
 import sys
-import time
 from collections.abc import Sequence
-from datetime import datetime  # Used to make a unique timestamped worker log folder.
-from pathlib import Path
 
-from trade_ai.model.features import (
-    FEATURE_SCHEMA_VERSION,  # Version the feature schema in each run folder.
-)
-from trade_ai.model.training.labeling import (
-    LABEL_SCHEMA_VERSION,  # Version the label schema in each run folder.
-)
+from trade_ai.environmentLoader import load_environment
+from trade_ai.logger import logger
+from trade_ai.model.modelTypes import BASE_MODELS
 from trade_ai.model.training.train_master_helper import (
-    TRAINING_COMMAND,
-    TrainingCmds,
-    _available_cpu_ids,
+    TrainingCommand,
     parse_training_args,
-    parseTrainingCommand,
+    parse_training_command,
 )
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-LOGS_DIRECTORY = (
-    REPOSITORY_ROOT / "logs"
-)  # Store detached worker logs under the repository logs folder.
 
+class TrainingRunner:
+    """Run selected training stages in the current process."""
 
-def backgroundTrainingWorker(trainingCmd: TRAINING_COMMAND) -> int:
-    """Placeholder entry point for a selected command in the detached process."""
+    def run(self, command: TrainingCommand) -> bool:
+        """Download requested data and execute the selected training stages."""
+        if not command.base_models and not command.train_meta_agent:
+            # A download-only command reports failure if any ticker could not be fetched.
+            return self._download_data(command.download_data)
 
-    print(f"background worker args are {trainingCmd}")
+        # Download before training imports; partial ticker failures do not stop the run.
+        self._download_data(command.download_data)
 
-    # Keep this temporary body explicit until the model-stage dispatcher is added.
-    counter = 0  # Start the placeholder work counter at zero.
+        try:
+            # Run every requested specialist, then train PPO if its inputs remain valid.
+            base_training_succeeded = self._train_base_models(command.base_models)
+            meta_training_succeeded = True
+            if command.train_meta_agent:
+                if command.base_models and not base_training_succeeded:
+                    logger.warning(
+                        "Skipping PPO because at least one selected base model failed."
+                    )
+                    meta_training_succeeded = False
+                else:
+                    meta_training_succeeded = self._train_meta_agent()
 
-    while counter < 15:  # Run the placeholder body a fixed number of times.
-        print(f"Counter is : {counter}")  # Emit the current placeholder progress value.
-        time.sleep(5)
-        counter += 1  # Advance the placeholder counter before its next iteration.
+            return base_training_succeeded and meta_training_succeeded
+        except Exception:
+            logger.exception("Training run failed.")
+            return False
 
-    return 0  # Report successful completion of the current placeholder handler.
+    @staticmethod
+    def _download_data(requested: bool) -> bool:
+        """Download missing ticker history when the command requests it."""
+        if not requested:
+            return True
 
+        # Keep the downloader import local so a download-only command avoids ML imports.
+        from trade_ai.model.training.util import download_missing_stock_data
 
-def startInBackground(trainingArgs: list[TrainingCmds]) -> None:
-    """Start this selection again as a detached worker invocation."""
+        failed_tickers = download_missing_stock_data()
+        if not failed_tickers:
+            return True
 
-    # Reuse the current interpreter and module command so the child runs in the same environment.
-    workerCommand = [
-        sys.executable,  # Reuse the current Python environment.
-        "-u",  # Write worker output immediately so the log stays current.
-        "-m",  # Run the module through Python's module launcher.
-        "trade_ai.model.training.train_master",
-    ]
+        # Training can still use all ticker histories that were downloaded successfully.
+        logger.warning(
+            "Continuing with available ticker data; downloads failed for: %s",
+            ", ".join(failed_tickers),
+        )
+        return False
 
-    # Add each selected option back as a CLI flag so the worker parses the same selection.
-    workerCommand.extend(f"--{trainingArg}" for trainingArg in trainingArgs)
-    workerCommand.append("--worker")  # add background-worker Arg in main().
+    def _train_base_models(self, model_names: tuple[BASE_MODELS, ...]) -> bool:
+        """Run each selected specialist and retain failures without skipping peers."""
+        succeeded = True
 
-    # Give numerical libraries the full CPU count available to this process.
-    cpu_count = len(_available_cpu_ids())
-    # Preserve the launcher's configured environment.
-    worker_environment = os.environ.copy()
-    for variable in (
-        "OMP_NUM_THREADS",
-        "MKL_NUM_THREADS",
-        "OPENBLAS_NUM_THREADS",
-        "NUMEXPR_NUM_THREADS",
-        "NUMEXPR_MAX_THREADS",
-    ):  # Cover the common native thread pools used by model training.
-        worker_environment[variable] = str(
-            cpu_count
-        )  # Override any inherited thread limit.
-    worker_environment["TRADE_AI_WORKER_CPU_COUNT"] = str(
-        cpu_count
-    )  # Let LightGBM use the same full count.
-    worker_environment["TRADE_AI_BASE_TRAINING_CPUS"] = str(
-        cpu_count
-    )  # Give base training every available CPU.
-    worker_environment["TRADE_AI_PPO_CPUS"] = str(
-        cpu_count
-    )  # Give PPO training every available CPU.
+        # Keep every requested model attempt independent so one failure does not skip others.
+        for model_name in model_names:
+            model_succeeded = self._train_base_model(model_name)
+            succeeded = model_succeeded and succeeded
 
-    # Create a versioned run directory so each worker's complete output is retained.
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    run_directory = LOGS_DIRECTORY / (
-        f"FS_{FEATURE_SCHEMA_VERSION}_LS_{LABEL_SCHEMA_VERSION}_{timestamp}"
-    )
-    run_directory.mkdir(parents=True, exist_ok=True)
-    worker_log_path = run_directory / "worker.log"
+        return succeeded
 
-    # Redirect both output streams to the log while detaching the worker from the terminal.
-    with worker_log_path.open("w", encoding="utf-8", buffering=1) as worker_log:
-        process = subprocess.Popen(  # Create the new worker process.
-            workerCommand,  # Run the same module with the selected options and worker flag.
-            cwd=REPOSITORY_ROOT,  # Keep imports and relative paths rooted in the repository.
-            stdin=subprocess.DEVNULL,  # Prevent the worker from waiting for terminal input.
-            stdout=worker_log,  # Save all worker standard output in its run directory.
-            stderr=subprocess.STDOUT,  # Save worker errors in the same log file.
-            env=worker_environment,  # Pass the full-core thread settings into the worker.
-            start_new_session=True,  # Detach the child from the launcher's terminal session.
-        )  # Finish starting the detached worker.
+    @staticmethod
+    def _train_base_model(model_name: BASE_MODELS) -> bool:
+        """Train one direction/family specialist and report whether it saved."""
+        try:
+            # Import only the selected trainer so unrelated model libraries stay unloaded.
+            if model_name == "long_lgb":
+                from trade_ai.model.training.long.train_long_lgb import train_long_lgb
 
-    worker_pid_path = run_directory / "worker.pid"
-    worker_pid_path.write_text(f"{process.pid}\n", encoding="utf-8")
+                saved = train_long_lgb()
+                if not saved:
+                    logger.warning("Long LightGBM did not pass its validation gate.")
+                    return False
+            elif model_name == "long_gru":
+                from trade_ai.model.training.long.train_long_gru import train_long_gru
 
-    print(f"Training worker started with PID: {process.pid}")
-    print(f"Training worker log: {worker_log_path}")
+                train_long_gru(epochs=20)
+            elif model_name == "short_lgb":
+                from trade_ai.model.training.short.train_short_lgb import train_short_lgb
+
+                saved = train_short_lgb()
+                if not saved:
+                    logger.warning("Short LightGBM did not pass its validation gate.")
+                    return False
+            else:
+                from trade_ai.model.training.short.train_short_gru import train_short_gru
+
+                train_short_gru(epochs=20)
+
+            logger.info("Completed training for %s.", model_name)
+            return True
+        except Exception:
+            logger.exception("Training failed for %s.", model_name)
+            return False
+
+    def _train_meta_agent(self) -> bool:
+        """Train the shared PPO policy using current specialist predictions."""
+        try:
+            # Import the PPO stack only when its training stage is selected.
+            from trade_ai.model.training.train_rl import train_meta_agent
+
+            trained = train_meta_agent()
+            if not trained:
+                logger.warning("PPO did not pass its policy-selection baseline.")
+            return trained
+        except Exception:
+            logger.exception("PPO training failed.")
+            return False
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Parse the selected command and route it to the parent or worker flow."""
+    """Parse the training selection and run it in the current process."""
+    # Load the repository environment for OpenAlgo and other configured services.
+    load_environment()
 
-    # 1. Fallback to sys.argv[1:] if no explicit argv sequence is provided
-    if argv is None:
-        argv = sys.argv[1:]
+    # Use the provided arguments when called programmatically, or read the CLI arguments.
+    args = list(sys.argv[1:] if argv is None else argv)
+    selected_options = parse_training_args(args)
+    command = parse_training_command(selected_options or [])
+    if command is None:
+        print("Select at least one training option.", file=sys.stderr)
+        return 1
 
-    args_list = list(argv)
-    print(f"Received arguments in main: {args_list}")
-
-    # Route only the explicit worker flag to the background command handler.
-    if "--worker" in args_list:
-        print(f"This worker thread command, and args are {args_list}")
-
-        trainingArgs = parse_training_args(args_list)
-        if not trainingArgs:
-            print("Training Args is invalid while starting worker, skipping worker")
-            return 1
-        else:
-            trainingCmd = parseTrainingCommand(trainingArgs)
-            if trainingCmd is not None:
-                # Return the worker handler's status to the child process exit code.
-                return backgroundTrainingWorker(trainingCmd)
-            else:
-                print("Training Cmd is invalid while starting worker, skipping worker")
-                return 1
-
-    else:
-        print("Now parsing args and sending with working after confirmation")
-
-        trainingArgs = parse_training_args(args_list)
-        print(f"trainingArgs: {trainingArgs}")
-
-        if not trainingArgs:
-            print("Training command is invalid, Please try again")
-            return 1
-        else:
-            startInBackground(trainingArgs)
-
-    # Report that the foreground process has handed work to its detached child.
-    print("Training Foreground Script ended, after starting background worker thread")
-    return 0
+    # Return a process exit status so tmux records whether the training run succeeded.
+    return 0 if TrainingRunner().run(command) else 1
 
 
 if __name__ == "__main__":

@@ -14,25 +14,15 @@ APPLICATION_ENVIRONMENT_VARIABLES = (
     "OPENALGO_HOST",
     "TRADE_AI_CHAT_ORIGINS",
 )
-OPTIONAL_ENVIRONMENT_VARIABLES = (
-    "TRADE_AI_BASE_TRAINING_CPUS",
-    "TRADE_AI_PPO_CPUS",
-)
-
-
 def load_environment() -> dict[str, str]:
     """Load the repository-root ``.env`` and return configured app settings.
 
     Existing process environment values take precedence over values in ``.env``.
-    Optional training CPU budgets are loaded alongside the required app settings.
     """
     load_dotenv(PROJECT_ROOT / ".env", override=False)
     return {
         name: os.environ[name]
-        for name in (
-            *APPLICATION_ENVIRONMENT_VARIABLES,
-            *OPTIONAL_ENVIRONMENT_VARIABLES,
-        )
+        for name in APPLICATION_ENVIRONMENT_VARIABLES
         if name in os.environ
     }
 

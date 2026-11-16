@@ -40,11 +40,9 @@ Run commands from the repository root.
    OPENALGO_API_KEY=your-api-key
    OPENALGO_HOST=https://your-openalgo-host
    TRADE_AI_CHAT_ORIGINS=http://localhost:3011,http://127.0.0.1:3011
-   TRADE_AI_BASE_TRAINING_CPUS=4
-   TRADE_AI_PPO_CPUS=3
    ```
 
-   The first three settings are required when starting the app. The two CPU settings are optional training budgets; base workers default to all available CPUs, while PPO defaults to up to three. `OPENALGO_HOST` should point to the OpenAlgo endpoint, and `TRADE_AI_CHAT_ORIGINS` is a comma-separated list of allowed frontend origins. Do not commit `.env` or put credential values in tracked files.
+   All three settings are required when starting the app. `OPENALGO_HOST` should point to the OpenAlgo endpoint, and `TRADE_AI_CHAT_ORIGINS` is a comma-separated list of allowed frontend origins. Do not commit `.env` or put credential values in tracked files.
 
 4. The application loads the repository-root `.env` before startup. Shell variables take precedence. You can also export values explicitly when starting from a different environment:
 
@@ -54,7 +52,7 @@ Run commands from the repository root.
    set +a
    ```
 
-5. `environmentLoader.py` loads optional CPU budgets for the training CLI and validates that all settings declared in `APPLICATION_ENVIRONMENT_VARIABLES` are present and nonblank before loading models or starting the server.
+5. `environmentLoader.py` validates that all settings declared in `APPLICATION_ENVIRONMENT_VARIABLES` are present and nonblank before loading models or starting the server.
 
 ## Dependencies Guide
 
@@ -120,29 +118,33 @@ export PIP_CACHE_DIR="$(pwd)/.run_cache"
 uv run python src/trade_ai/app.py
 ```
 
-Train selected directional models in the foreground. The first selector is the
-mindset (`long`, `short`, or `both`, default `both`); the second is the
-component (`gru`, `lgb`, `rl`, or `all`, default `all`). The full run trains all
-four base specialists and then the shared PPO meta-agent:
+To keep a training run available after disconnecting, start it in tmux. Run
+these commands from the repository root:
 
 ```sh
-uv run python -m trade_ai.model.training.train_master both all
+tmux new -s trade-ai-training
+uv run python -m trade_ai.model.training.train_master --all
 ```
 
-Examples:
+Detach with `Ctrl+B`, then `D`; reconnect with
+`tmux attach -t trade-ai-training`. Explicit model flags run directly without
+opening the interactive selector. `--all` downloads missing history, trains
+all four base specialists, then trains the shared PPO meta-agent.
+
+Examples of other selections:
 
 ```sh
-uv run python -m trade_ai.model.training.train_master long lgb
-uv run python -m trade_ai.model.training.train_master short gru
-uv run python -m trade_ai.model.training.train_master both rl
+uv run python -m trade_ai.model.training.train_master --long_lgb
+uv run python -m trade_ai.model.training.train_master --short_gru
+uv run python -m trade_ai.model.training.train_master --meta_ensemble
 ```
 
 RL is one shared policy over all four base models and requires compatible
-out-of-sample predictions from each specialist. See
-`src/trade_ai/model/training/training.md` for its validation and detached-run
-logging details.
+out-of-sample predictions from each specialist. Use `--download` with other
+flags to fetch missing ticker history before training. See
+`src/trade_ai/model/training/training.md` for validation and lifecycle details.
 
-Stop a foreground app or training process with `Ctrl+C`.
+Stop training with `Ctrl+C` in its tmux pane.
 
 ## First Start
 

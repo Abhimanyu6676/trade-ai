@@ -60,7 +60,7 @@ Status: In progress / Finalizing base models.
 Milestones:
 [ ] Verify airtight chronological splitting and feature engineering (features.py, sequence_loader.py).
 [ ] Validate FastAPI asynchronous inference endpoint with asyncio.to_thread.
-[ ] Confirm AWS EC2 thread throttling (OMP_NUM_THREADS=2, torch.set_num_threads(2)) under concurrent load.
+[ ] Confirm training remains stable under concurrent load using library defaults.
 [ ] Run forward-testing / paper trading via OpenAlgo for at least 2–4 weeks.
 Phase 2: Inverting the Labeling Pipeline (The "Short Specialist")
 Goal: Create a mirrored labeling script optimized exclusively for downward market momentum and liquidity sweeps.

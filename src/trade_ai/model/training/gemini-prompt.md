@@ -58,13 +58,13 @@ Please implement the following exact requirements across the codebase:
 - **Environment State Space:** Observes frozen base model probabilities (`[P_lgb, P_gru]`), agreement metrics, market volatility (ATR), and portfolio state.
 - **Environment Reward Function:** Rewards clean wins (matching the 1% / 0.5% targets) and penalizes drawdowns, high turnover, or trading during model disagreement.
 
-### 4. Training Master Launcher (`src/trade_ai/model/training/train_master.py`)
-- Accept two optional positional args: mindset (`long`, `short`, or `both`, default `both`) and component (`gru`, `lgb`, `rl`, or `all`, default `all`).
-- Validate supplied args before any training starts. In an interactive foreground shell, show selectors when no args are supplied and ask for yes/no confirmation when args are supplied. In a non-interactive or background shell, use defaults for omitted args and do not prompt.
-- Always launch the actual training worker as a detached process. Save user-supplied and resolved args in a timestamped JSON metadata file and the training log under the repository-root `logs/` directory, and save the worker PID in `logs/train.pid`.
-- Print the worker PID and log/metadata paths so the user can follow the run after the launcher returns.
-- Route execution to the correct long/short specialist trainers and the unified PPO trainer, preserving the existing schema checks.
-- Document the foreground launcher invocation and the detached worker logging behavior in `training.md`.
+### 4. Training CLI (`src/trade_ai/model/training/train_master.py`)
+- Accept explicit model flags for the four base specialists, PPO, `--download`, and `--all`.
+- When no flags are supplied in an interactive terminal, show a multi-option selector. Explicit flags run directly without a prompt so tmux sessions can start non-interactively.
+- Run selected stages synchronously in the current process. Do not create subprocesses or detached workers; tmux owns session persistence.
+- Run selected trainer modules without initializing the inference model manager or backing up, unloading, or reloading loaded models. Trainer modules own artifact writes; inference artifacts are deployed to the serving VPS separately.
+- Leave CPU affinity and ML-library thread counts at their defaults.
+- Document tmux launch and reattach commands in `training.md`.
 
 ### 5. Validation & Safety Checks
 - Ensure all scripts validate dataset schema versions before loading historical weights. If an artifact was saved under an older schema version, raise an explicit error prompting re-training.
