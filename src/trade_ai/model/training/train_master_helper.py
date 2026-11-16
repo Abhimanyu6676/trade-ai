@@ -70,7 +70,9 @@ def parse_training_args(argv: list[str]) -> list[TrainingOption] | None:
 
     # Resolve the command line before deciding whether an interactive prompt is useful.
     parsed = parser.parse_args(argv)
-    selected_options = [option for option in options if getattr(parsed, option)]
+    selected_options: list[TrainingOption] = [
+        option for option in options if getattr(parsed, option)
+    ]
 
     # Explicit flags work without prompting, including inside detached tmux sessions.
     if selected_options or not sys.stdin.isatty():
