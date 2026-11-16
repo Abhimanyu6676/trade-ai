@@ -14,7 +14,9 @@ Last reviewed: 2026-11-01.
 
 ### Code and refactoring
 
+- Apply SOLID principles and object-oriented programming concepts wherever they fit the task and codebase; use judgment and avoid forcing abstractions where a simpler design is clearer.
 - Prefer object-oriented design where it fits the module, and follow Don't Repeat Yourself (DRY) principles by reusing shared logic instead of duplicating it.
+- Whenever adding or modifying code, and whenever providing code blocks in responses, include inline comments that explain the workflow, purpose of each meaningful block, and its role in the larger operation. Use comments to clarify intent rather than restate syntax.
 - When creating or refactoring functions, add a brief docstring describing the function's purpose and detailed `#` comments explaining its workflow and the specific job of each meaningful code block.
 - Keep types with the module they describe in that module's `*Types.py` file. Routes should import and reuse those types when defining request or response contracts; for example, OHLCV candle data and validation belong in `openalgo/openalgoTypes.py`.
 - When refactoring server/API code or changing anything that may affect frontend integration—including endpoint behavior, request parameters or body, or response values or shape—ask the user whether they want corresponding changes made in the sibling `trade-ai-chat` project. Wait for their answer before making those frontend changes.
