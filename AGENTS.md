@@ -47,9 +47,13 @@ Last reviewed: 2026-11-01.
 - Treat `src/trade_ai/server/server.md` as the server module and API endpoint guidebook and rulebook. Read and follow it before changing server code or endpoints, and update it whenever an endpoint or server behavior changes.
 - When training logic or lifecycle steps change, update `src/trade_ai/model/training/training.md` in the same change.
 
+### Verification
+
+- Before concluding any task, run `ruff check .`, `pyright` (or `mypy` if `pyright` is unavailable), and relevant `pytest` tests.
+- Resolve lint warnings, type errors, and failing tests before concluding. If a required tool is unavailable or no relevant tests exist, state that clearly rather than claiming the check passed.
+
 ## DON'T
 
 - Never include raw OHLCV values as model input features. Keep raw OHLCV in the source frame for calculations only.
 - Never write credential values, tokens, or private environment values into tracked files or logs.
-- Do not add or run tests unless the user asks. No test command is currently configured in `pyproject.toml`.
 - Don't touch `codex-accounts.json`
