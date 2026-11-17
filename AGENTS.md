@@ -21,6 +21,20 @@ Last reviewed: 2026-11-01.
 - Keep types with the module they describe in that module's `*Types.py` file. Routes should import and reuse those types when defining request or response contracts; for example, OHLCV candle data and validation belong in `openalgo/openalgoTypes.py`.
 - When refactoring server/API code or changing anything that may affect frontend integration—including endpoint behavior, request parameters or body, or response values or shape—ask the user whether they want corresponding changes made in the sibling `trade-ai-chat` project. Wait for their answer before making those frontend changes.
 
+### Code quality and refactoring rules
+
+- Prefer flat guard clauses for invalid or early-exit states so business logic stays shallow and easy to follow.
+- When moving a condition to the caller, remove the now-redundant boolean parameter from the helper instead of passing a hardcoded `True`.
+- Avoid checking the same boolean condition in both branches of an `if`/`elif`; consolidate the control flow to express each state once.
+- Preserve existing failure-isolation behavior unless the user asks to change it. Follow the behavior documented in `context.md`, including continuing training with available data after partial ticker-download failures while failing download-only commands when any ticker download fails.
+- Do not let decorators or telemetry wrappers run for skipped or no-op stages. Guard the stage call at the call site instead.
+
+### Combined code bundles
+
+- When the user requests a combined code bundle, create or refresh `combined-code.md` in the repository root with only the files relevant to that task. Start with a brief directory tree of relative paths, then include every file in full under a `###` heading with its exact repository-relative path and a correctly tagged fenced code block. Do not truncate, summarize, or omit comments.
+- Exclude generated files, caches, virtual environments, logs, and large data or model binaries, including `__pycache__`, `.venv`, `.git`, `*.pt`, `*.pkl`, and `*.csv`.
+- Keep the bundle free of commentary between the directory tree and file blocks. When you change a file already included in `combined-code.md`, refresh the bundle to match the complete current file. If the user changes an included file and asks for an update, regenerate the bundle from the current repository contents.
+
 ### Documentation and maintenance
 
 - Keep project-specific facts and technical behavior in `context.md`; keep this file limited to agent workflow and repository maintenance instructions.

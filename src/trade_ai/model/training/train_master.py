@@ -106,12 +106,15 @@ class TrainingRunner:
     def run(self, command: TrainingCommand) -> bool:
         """Download requested data and execute the selected training stages."""
         has_base_models = bool(command.long_models or command.short_models)
-        if not has_base_models and not command.train_meta_agent:
-            # A download-only command reports failure if any ticker could not be fetched.
-            return self._download_data(command.download_data)
+        has_training_stages = has_base_models or command.train_meta_agent
 
-        # Download before training imports; partial ticker failures do not stop the run.
-        self._download_data(command.download_data)
+        # Finish download-only requests immediately, and reject commands with no selected work.
+        if not has_training_stages:
+            return self._download_data() if command.download_data else False
+
+        # Do not invoke the timed downloader stage unless the user requested it.
+        if command.download_data:
+            self._download_data()
 
         # Run long group first (lgb -> gru), then short group (lgb -> gru).
         long_succeeded = self._train_direction_group("Long", command.long_models)
@@ -132,11 +135,8 @@ class TrainingRunner:
 
     @staticmethod
     @log_duration("Data download")
-    def _download_data(requested: bool) -> bool:
-        """Download missing ticker history when the command requests it."""
-        if not requested:
-            return True
-
+    def _download_data() -> bool:
+        """Download missing ticker history for a command that selected downloading."""
         # Keep the downloader import local so a download-only command avoids ML imports.
         from trade_ai.model.training.util import download_missing_stock_data
 
